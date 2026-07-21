@@ -1,42 +1,53 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
-import { services } from '@/services';
-import type { AsyncStatus, HealthProfile, HealthSharePayload } from '@/types';
-import { createId } from '@/utils/id';
+import { useAuth } from '@/hooks/useAuth';
+import type { BloodType, HealthIdPayload, HealthProfile } from '@/types';
 
-/** Loads the Universal Health Profile and derives a QR share payload. */
+/**
+ * Derives the Universal Health Profile + Health ID QR payload from the
+ * signed-in AgapAI session. The QR carries the patient key so records stay
+ * end-to-end encrypted: only people the patient physically shows the QR to
+ * (doctor, pharmacist) can read their consultations.
+ */
 export function useHealthProfile() {
-  const [status, setStatus] = useState<AsyncStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [profile, setProfile] = useState<HealthProfile | null>(null);
+  const { session } = useAuth();
+  const user = session?.user ?? null;
 
-  const load = useCallback(async () => {
-    setStatus('loading');
-    setError(null);
-    try {
-      const result = await services.healthProfile.get();
-      setProfile(result);
-      setStatus('success');
-    } catch {
-      setStatus('error');
-      setError('We could not load your health profile. Please try again.');
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const sharePayload = useMemo<HealthSharePayload | null>(() => {
-    if (!profile) return null;
+  const profile = useMemo<HealthProfile | null>(() => {
+    if (!user) return null;
+    const fullName = [user.firstName, user.middleName, user.lastName, user.suffix]
+      .filter(Boolean)
+      .join(' ');
     return {
-      version: 1,
+      fullName,
+      dateOfBirth: user.birthDate ?? '—',
+      bloodType: (user.bloodType as BloodType) ?? 'unknown',
+      allergies: user.allergies,
+      conditions: user.conditions,
+      emergencyContact: {
+        name: user.emergencyName ?? '—',
+        relationship: 'Emergency contact',
+        phone: user.emergencyPhone ?? '—',
+      },
+    };
+  }, [user]);
+
+  const sharePayload = useMemo<HealthIdPayload | null>(() => {
+    if (!user || !session?.patientKey || !profile) return null;
+    return {
+      v: 2,
       type: 'agapai.health-id',
-      // Mock token; a real backend would issue a short-lived, revocable token.
-      token: createId('share'),
+      healthId: user.id,
+      key: session.patientKey,
       preview: { fullName: profile.fullName, bloodType: profile.bloodType },
     };
-  }, [profile]);
+  }, [user, session?.patientKey, profile]);
 
-  return { status, error, profile, sharePayload, refresh: load };
+  return {
+    status: profile ? ('success' as const) : ('loading' as const),
+    error: null,
+    profile,
+    sharePayload,
+    refresh: () => {},
+  };
 }

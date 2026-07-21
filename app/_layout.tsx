@@ -25,7 +25,7 @@ configureNotificationHandler();
 
 /**
  * Watches auth status and keeps the user in the right route group:
- * signed-out users are sent to (auth); signed-in users to the tabs.
+ * signed-out users → login; first-timers → registration; signed-in → tabs.
  */
 function useProtectedRoute() {
   const { status } = useAuth();
@@ -37,6 +37,8 @@ function useProtectedRoute() {
     const inAuthGroup = segments[0] === '(auth)';
     if (status === 'signedOut' && !inAuthGroup) {
       router.replace('/(auth)/login');
+    } else if (status === 'registering' && !inAuthGroup) {
+      router.replace('/(auth)/register');
     } else if (status === 'signedIn' && inAuthGroup) {
       router.replace('/(tabs)');
     }
@@ -56,10 +58,22 @@ function RootNavigator() {
       }}
     >
       <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/register" options={{ title: 'Registration', headerBackVisible: true }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="medication/add" options={{ title: 'Add medicine', presentation: 'modal' }} />
       <Stack.Screen name="medication/[id]" options={{ title: 'Medicine details' }} />
       <Stack.Screen name="scan" options={{ title: 'Scan Health ID', presentation: 'modal' }} />
+      <Stack.Screen name="health-id" options={{ title: 'My Health ID', presentation: 'modal' }} />
+      <Stack.Screen name="assistant" options={{ title: 'AI Health Assistant' }} />
+      <Stack.Screen name="consultation/[id]" options={{ title: 'Consultation record' }} />
+      <Stack.Screen name="scan-document" options={{ title: 'Scan document', presentation: 'modal' }} />
+      <Stack.Screen name="verify-identity" options={{ title: 'Verify your identity', presentation: 'modal' }} />
+      <Stack.Screen name="edit-profile" options={{ title: 'Edit personal info' }} />
+      <Stack.Screen name="directory" options={{ title: 'Verified professionals' }} />
+      <Stack.Screen name="guide" options={{ title: 'How to use AgapAI' }} />
+      <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
+      <Stack.Screen name="terms" options={{ title: 'Terms & Conditions' }} />
+      <Stack.Screen name="about" options={{ title: 'About AgapAI' }} />
     </Stack>
   );
 }

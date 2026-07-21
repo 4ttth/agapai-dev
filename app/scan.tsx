@@ -19,8 +19,8 @@ type ScanResult =
 
 function parsePayload(raw: string): HealthSharePayload | null {
   try {
-    const parsed = JSON.parse(raw) as Partial<HealthSharePayload>;
-    if (parsed?.type === 'agapai.health-id' && parsed.version === 1 && parsed.preview) {
+    const parsed = JSON.parse(raw) as Partial<HealthSharePayload> & { v?: number };
+    if (parsed?.type === 'agapai.health-id' && (parsed.version === 1 || parsed.v === 2) && parsed.preview) {
       return parsed as HealthSharePayload;
     }
     return null;

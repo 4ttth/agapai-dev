@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  PHARMACIST
+}
+
+enum MedSource {
+  SELF
+  DOCTOR
+  PHARMACIST
+}
+
+model User {
+  id             String   @id @default(cuid())
+  egovUniqid     String?  @unique
+  role           Role     @default(PATIENT)
+  firstName      String
+  lastName       String
+  middleName     String?
+  suffix         String?
+  birthDate      String?
+  mobile         String?
+  bloodType      String?
+  allergies      String   @default("[]")
+  conditions     String   @default("[]")
+  emergencyName  String?
+  emergencyPhone String?
+  prcLicense     String?
+  verified       Boolean  @default(false)
+  everified      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  consultationsAsPatient Consultation[] @relation("patient")
+  consultationsAsDoctor  Consultation[] @relation("doctor")
+  medications            Medication[]
+}
+
+model Consultation {
+  id          String    @id @default(cuid())
+  patientId   String
+  doctorId    String
+  date        DateTime
+  type        String
+  ciphertext  String
+  iv          String
+  salt        String
+  hasVoice    Boolean   @default(false)
+  hasRxImage  Boolean   @default(false)
+  dispensedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  patient User @relation("patient", fields: [patientId], references: [id])
+  doctor  User @relation("doctor", fields: [doctorId], references: [id])
+}
+
+model Medication {
+  id             String    @id @default(cuid())
+  patientId      String
+  name           String
+  dosage         String
+  instructions   String?
+  times          String    @default("[]")
+  quantity       Int?
+  source         MedSource @default(SELF)
+  consultationId String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  patient User @relation(fields: [patientId], references: [id])
+}
+
+model SmsLog {
+  id        String   @id @default(cuid())
+  patientId String
+  dedupeKey String   @unique
+  message   String
+  status    String
+  sentAt    DateTime @default(now())
+}
+
+model Metric {
+  id     String   @id @default(cuid())
+  route  String
+  method String
+  status Int
+  ms     Int
+  at     DateTime @default(now())
+}

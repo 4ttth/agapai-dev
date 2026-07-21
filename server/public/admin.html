@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgapAI Admin</title>
+<style>
+  :root {
+    --blue: #0b4f9e; --blue-dark: #062f5e; --blue-light: #e4eef9;
+    --ink: #0f1b2d; --ink-soft: #4a5a6e; --line: #e4e9ef;
+    --ok: #1b7f4b; --bad: #b3261e; --warn: #946200; --bg: #f4f6f9;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 15px/1.5 system-ui, 'Segoe UI', sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: linear-gradient(120deg, var(--blue-dark), var(--blue)); color: #fff; padding: 20px 28px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header .sub { opacity: .8; font-size: 13px; }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 20px; display: grid; gap: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .card .n { font-size: 28px; font-weight: 800; color: var(--blue); }
+  .card .l { color: var(--ink-soft); font-size: 13px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  section h2 { font-size: 16px; margin-bottom: 12px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--blue-light); }
+  .chip.ok { background: #ddf2e6; color: var(--ok); }
+  .chip.bad { background: #fbe3e1; color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--ink-soft); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  input, button { font: inherit; }
+  input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  button { background: var(--blue); border: 0; color: #fff; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+  button:hover { background: var(--blue-dark); }
+  .muted { color: var(--ink-soft); font-size: 13px; }
+  #login { max-width: 380px; margin: 80px auto; display: grid; gap: 10px; }
+  .role { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--blue-light); color: var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>AgapAI — Admin Console</h1>
+    <div class="sub">eGov service health · usage · professional verification</div>
+  </div>
+  <div class="sub" id="updated"></div>
+</header>
+
+<div id="login">
+  <section>
+    <h2>Admin key</h2>
+    <p class="muted">Enter the ADMIN_KEY configured on the server.</p><br/>
+    <input id="key" type="password" placeholder="admin key" style="width:100%" />
+    <br/><br/><button onclick="saveKey()" style="width:100%">Enter console</button>
+    <p class="muted" id="loginErr"></p>
+  </section>
+</div>
+
+<main id="app" style="display:none">
+  <div class="cards" id="cards"></div>
+  <section>
+    <h2>Service health</h2>
+    <div class="chips" id="health"></div>
+  </section>
+  <section>
+    <h2>Pending professional verification</h2>
+    <p class="muted">Check the PRC license at <a href="https://verification.prc.gov.ph/" target="_blank">verification.prc.gov.ph</a>, then record the license number to approve.</p>
+    <table id="pending"><thead><tr><th>Name</th><th>Role</th><th>Registered</th><th>PRC License No.</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Users</h2>
+    <table id="users"><thead><tr><th>Name</th><th>Role</th><th>Verified</th><th>PRC No.</th><th>eVerified</th><th>Joined</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Recent API requests</h2>
+    <table id="metrics"><thead><tr><th>Time</th><th>Method</th><th>Route</th><th>Status</th><th>ms</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+
+<script>
+let KEY = localStorage.getItem('agapai_admin_key') || '';
+const $ = (s) => document.querySelector(s);
+const h = (k) => ({ 'x-admin-key': KEY, 'Content-Type': 'application/json' });
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, { ...opts, headers: { ...h(), ...(opts.headers || {}) } });
+  if (res.status === 401) throw new Error('bad key');
+  return res.json();
+}
+
+function saveKey() {
+  KEY = $('#key').value.trim();
+  localStorage.setItem('agapai_admin_key', KEY);
+  boot();
+}
+
+async function boot() {
+  try {
+    await refresh();
+    $('#login').style.display = 'none';
+    $('#app').style.display = 'grid';
+    setInterval(refresh, 30000);
+  } catch (e) {
+    $('#loginErr').textContent = 'Invalid key or server unreachable.';
+    localStorage.removeItem('agapai_admin_key');
+  }
+}
+
+async function refresh() {
+  const o = await api('/admin/overview');
+  const c = o.counts;
+  const credits = o.aiCredits && (o.aiCredits.credits_remaining ?? o.aiCredits.data?.credits_remaining);
+  $('#cards').innerHTML = [
+    [c.patients, 'Patients'], [c.doctors, 'Doctors'], [c.pharmacists, 'Pharmacists'],
+    [c.pending, 'Pending verification'], [c.consultations, 'Consultations'], [c.sms, 'SMS sent'],
+    [o.traffic.last24h, 'Requests (24h)'], [o.traffic.avgMs + 'ms', 'Avg latency'],
+    [credits ?? '—', 'eGov AI credits'],
+  ].map(([n, l]) => `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+  $('#health').innerHTML = Object.entries(o.services).map(([name, s]) =>
+    `<span class="chip ${s.reachable ? 'ok' : 'bad'}">${name.toUpperCase()} · ${s.reachable ? 'UP' : 'DOWN'} · ${s.ms}ms</span>`
+  ).join('') + `<span class="chip ok">DATABASE · UP</span>`;
+
+  const p = await api('/admin/pending');
+  $('#pending tbody').innerHTML = p.users.length === 0
+    ? '<tr><td colspan="5" class="muted">Nothing pending 🎉</td></tr>'
+    : p.users.map(u => `<tr>
+        <td>${u.firstName} ${u.lastName}</td>
+        <td><span class="role">${u.role}</span></td>
+        <td class="muted">${new Date(u.createdAt).toLocaleString()}</td>
+        <td><input id="prc-${u.id}" placeholder="e.g. 0123456" /></td>
+        <td><button onclick="verify('${u.id}')">Verify</button></td>
+      </tr>`).join('');
+
+  const us = await api('/admin/users');
+  $('#users tbody').innerHTML = us.users.map(u => `<tr>
+      <td>${u.firstName} ${u.lastName}</td><td><span class="role">${u.role}</span></td>
+      <td>${u.verified ? '✅' : '⏳'}</td><td>${u.prcLicense || '—'}</td>
+      <td>${u.everified ? '✅' : '—'}</td>
+      <td class="muted">${new Date(u.createdAt).toLocaleDateString()}</td>
+    </tr>`).join('');
+
+  const m = await api('/admin/metrics');
+  $('#metrics tbody').innerHTML = m.metrics.slice(0, 25).map(r => `<tr>
+      <td class="muted">${new Date(r.at).toLocaleTimeString()}</td>
+      <td>${r.method}</td><td>${r.route}</td><td>${r.status}</td><td>${r.ms}</td>
+    </tr>`).join('');
+
+  $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+async function verify(id) {
+  const prc = document.getElementById('prc-' + id).value.trim();
+  if (!prc) return alert('Enter the PRC License No. first (verify at verification.prc.gov.ph).');
+  await api('/admin/verify', { method: 'POST', body: JSON.stringify({ userId: id, prcLicense: prc }) });
+  refresh();
+}
+
+if (KEY) { $('#key').value = KEY; boot(); }
+</script>
+</body>
+</html>

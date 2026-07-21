@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "AgapAI Pro",
+    "slug": "agapai-pro",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "agapai-pro",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.4ttth.agapaipro",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "package": "tech.ssecka.agapai.pro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AgapAI Pro scans patient Health IDs and paper prescriptions."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "AgapAI Pro records consultation voice notes."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

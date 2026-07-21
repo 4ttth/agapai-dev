@@ -1,36 +1,54 @@
-name: Build Unsigned iOS App
+name: Build Unsigned iOS Apps (Patient + Pro)
 
-on: 
-  workflow_dispatch: # Allows you to manually trigger the build with a button click
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Server URL baked into the apps (e.g. http://203.0.113.10:4000). Falls back to the AGAPAI_API_URL repo variable.'
+        required: false
+        type: string
 
 jobs:
   build-ios:
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: AgapAI-Patient
+            dir: .
+            scheme: AgapAIHealth # Expo strips spaces/punctuation from "AgapAI Health"
+          - app: AgapAI-Pro
+            dir: pro-app
+            scheme: AgapAIPro
+    env:
+      EXPO_PUBLIC_API_URL: ${{ inputs.api_url || vars.AGAPAI_API_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          
+
       - name: Install dependencies
-        # Your project's .npmrc file will automatically handle the legacy-peer-deps=true requirement
-        run: npm install 
-        
+        working-directory: ${{ matrix.dir }}
+        run: npm install
+
       - name: Generate native iOS project
+        working-directory: ${{ matrix.dir }}
         run: npx expo prebuild --platform ios
-        
+
       - name: Install CocoaPods
-        run: cd ios && pod install
-        
-      - name: Build App (No Code Signing)
+        working-directory: ${{ matrix.dir }}/ios
+        run: pod install
+
+      - name: Build app (no code signing)
+        working-directory: ${{ matrix.dir }}/ios
         run: |
-          cd ios
-          # Using AgapAIHealth as Expo strips spaces from "AgapAI Health"
-          xcodebuild -workspace AgapAIHealth.xcworkspace \
-            -scheme AgapAIHealth \
+          xcodebuild -workspace ${{ matrix.scheme }}.xcworkspace \
+            -scheme ${{ matrix.scheme }} \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -38,17 +56,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_IDENTITY="" \
             build
-            
-      - name: Package into an IPA
+
+      - name: Package into an unsigned IPA
+        working-directory: ${{ matrix.dir }}/ios
         run: |
-          cd ios
           mkdir Payload
-          # Moving the compiled .app file into the Payload folder
-          mv build/Build/Products/Release-iphoneos/AgapAIHealth.app Payload/
-          zip -r app.ipa Payload
-          
+          mv build/Build/Products/Release-iphoneos/${{ matrix.scheme }}.app Payload/
+          zip -r ${{ matrix.app }}-unsigned.ipa Payload
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: unsigned-app
-          path: ios/app.ipa
+          name: ${{ matrix.app }}-ios
+          path: ${{ matrix.dir }}/ios/${{ matrix.app }}-unsigned.ipa
