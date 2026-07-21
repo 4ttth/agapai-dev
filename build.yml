@@ -1,0 +1,54 @@
+name: Build Unsigned iOS App
+
+on: 
+  workflow_dispatch: # Allows you to manually trigger the build with a button click
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install dependencies
+        # Your project's .npmrc file will automatically handle the legacy-peer-deps=true requirement
+        run: npm install 
+        
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios
+        
+      - name: Install CocoaPods
+        run: cd ios && pod install
+        
+      - name: Build App (No Code Signing)
+        run: |
+          cd ios
+          # Using AgapAIHealth as Expo strips spaces from "AgapAI Health"
+          xcodebuild -workspace AgapAIHealth.xcworkspace \
+            -scheme AgapAIHealth \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY="" \
+            build
+            
+      - name: Package into an IPA
+        run: |
+          cd ios
+          mkdir Payload
+          # Moving the compiled .app file into the Payload folder
+          mv build/Build/Products/Release-iphoneos/AgapAIHealth.app Payload/
+          zip -r app.ipa Payload
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app
+          path: ios/app.ipa
