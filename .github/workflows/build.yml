@@ -10,7 +10,9 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-15
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
