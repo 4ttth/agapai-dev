@@ -10,8 +10,10 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "AgapAI uses the camera to scan health QR codes so clinic staff can view your medical profile."
-      }
+        "NSCameraUsageDescription": "AgapAI uses the camera to scan health QR codes so clinic staff can view your medical profile.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.4ttth.agapaihealth"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +29,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "tech.ssecka.agapai"
     },
     "web": {
       "favicon": "./assets/favicon.png",
