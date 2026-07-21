@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
@@ -30,7 +31,7 @@ export default function ConsultationDetailScreen() {
   const [state, setState] = useState<'loading' | 'ready' | 'error' | 'locked'>('loading');
   const [playing, setPlaying] = useState(false);
   const [added, setAdded] = useState(false);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -54,27 +55,34 @@ export default function ConsultationDetailScreen() {
       .catch(() => active && setState('error'));
     return () => {
       active = false;
-      soundRef.current?.unloadAsync().catch(() => {});
+      soundRef.current?.remove();
     };
   }, [id, session?.patientKey]);
 
   const playVoice = useCallback(async () => {
     if (!record?.voiceB64) return;
     if (playing) {
-      await soundRef.current?.stopAsync().catch(() => {});
+      soundRef.current?.pause();
+      soundRef.current?.remove();
+      soundRef.current = null;
       setPlaying(false);
       return;
     }
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: `data:audio/m4a;base64,${record.voiceB64}` },
-        { shouldPlay: true },
-      );
-      soundRef.current = sound;
-      setPlaying(true);
-      sound.setOnPlaybackStatusUpdate((s) => {
-        if (s.isLoaded && s.didJustFinish) setPlaying(false);
+      // Materialize the encrypted-then-decrypted note as a cache file — data:
+      // URIs aren't reliably playable by the native players.
+      const file = `${FileSystem.cacheDirectory}voice-note.m4a`;
+      await FileSystem.writeAsStringAsync(file, record.voiceB64, {
+        encoding: FileSystem.EncodingType.Base64,
       });
+      await setAudioModeAsync({ playsInSilentMode: true });
+      const player = createAudioPlayer({ uri: file });
+      soundRef.current = player;
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) setPlaying(false);
+      });
+      player.play();
+      setPlaying(true);
     } catch {
       setPlaying(false);
     }

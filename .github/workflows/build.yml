@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'Server URL baked into the apps (e.g. http://203.0.113.10:4000). Falls back to the AGAPAI_API_URL repo variable.'
+        description: 'Server URL baked into the apps (e.g. http://203.0.113.10:4000)'
         required: false
         type: string
 
@@ -23,29 +23,25 @@ jobs:
             scheme: AgapAIPro
     env:
       EXPO_PUBLIC_API_URL: ${{ inputs.api_url || vars.AGAPAI_API_URL }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '16.4'
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # Bumped to 24 to resolve the deprecation warning
 
       - name: Install dependencies
         working-directory: ${{ matrix.dir }}
         run: npm install
 
-      - name: Generate native iOS project & Pods
+      - name: Generate native iOS project
         working-directory: ${{ matrix.dir }}
         run: npx expo prebuild --platform ios
 
-      - name: Build app (no code signing)
+      - name: Build app (Ad-Hoc Signing)
         working-directory: ${{ matrix.dir }}/ios
         run: |
           xcodebuild -workspace ${{ matrix.scheme }}.xcworkspace \
@@ -53,15 +49,14 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_IDENTITY="" \
             build
 
       - name: Package into an unsigned IPA
         working-directory: ${{ matrix.dir }}/ios
         run: |
-          mkdir Payload
+          mkdir -p Payload
           mv build/Build/Products/Release-iphoneos/${{ matrix.scheme }}.app Payload/
           zip -r ${{ matrix.app }}-unsigned.ipa Payload
 

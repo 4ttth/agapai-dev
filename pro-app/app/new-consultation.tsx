@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { CameraView } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -36,7 +36,7 @@ export default function NewConsultationScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const recRef = useRef<Audio.Recording | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const camRef = useRef<CameraView>(null);
 
   useEffect(() => {
@@ -60,11 +60,8 @@ export default function NewConsultationScreen() {
     try {
       if (recording) {
         setRecording(false);
-        const rec = recRef.current;
-        recRef.current = null;
-        if (!rec) return;
-        await rec.stopAndUnloadAsync();
-        const uri = rec.getURI();
+        await recorder.stop();
+        const uri = recorder.uri;
         if (uri) {
           const b64 = await FileSystem.readAsStringAsync(uri, {
             encoding: FileSystem.EncodingType.Base64,
@@ -72,13 +69,11 @@ export default function NewConsultationScreen() {
           setVoiceB64(b64);
         }
       } else {
-        const perm = await Audio.requestPermissionsAsync();
+        const perm = await AudioModule.requestRecordingPermissionsAsync();
         if (!perm.granted) return setError('Microphone permission is needed for voice notes.');
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-        const { recording: rec } = await Audio.Recording.createAsync(
-          Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        );
-        recRef.current = rec;
+        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+        await recorder.prepareToRecordAsync();
+        recorder.record();
         setRecording(true);
       }
     } catch {
