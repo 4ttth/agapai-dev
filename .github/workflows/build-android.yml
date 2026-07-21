@@ -1,0 +1,57 @@
+name: Build Android APK
+
+on: 
+  workflow_dispatch: # Allows you to manually trigger the build
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17' # Required by Expo SDK 50+
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android
+        
+      - name: Build Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease
+          
+      - name: Sign APK for Sideloading
+        run: |
+          # Install Android APK Signer
+          sudo apt-get install -y apksigner
+          
+          # Find the compiled unsigned APK
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*-unsigned.apk" | head -n 1)
+          
+          # Sign the Release APK with React Native's default debug keystore
+          apksigner sign --ks android/app/debug.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            $APK_PATH
+            
+          # Rename for a clean download
+          mv $APK_PATH android/app/build/outputs/apk/release/AgapAIHealth.apk
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/release/AgapAIHealth.apk
