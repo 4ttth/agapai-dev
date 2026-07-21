@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24 # Bumped to 24 to resolve the deprecation warning
+          node-version: 24
 
       - name: Install dependencies
         working-directory: ${{ matrix.dir }}
