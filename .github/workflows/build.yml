@@ -41,7 +41,7 @@ jobs:
         working-directory: ${{ matrix.dir }}
         run: npx expo prebuild --platform ios
 
-      - name: Build app (Ad-Hoc Signing)
+      - name: Build app (Ad-Hoc Signing without Dev Team)
         working-directory: ${{ matrix.dir }}/ios
         run: |
           xcodebuild -workspace ${{ matrix.scheme }}.xcworkspace \
@@ -51,6 +51,8 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
             build
 
       - name: Package into an unsigned IPA
