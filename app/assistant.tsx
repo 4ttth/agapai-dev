@@ -1,0 +1,291 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { AppText } from '@/components/ui/AppText';
+import { useMedications } from '@/features/pill-tracker';
+import { useAuth } from '@/hooks/useAuth';
+import { useSpeech } from '@/hooks/useSpeech';
+import { serverApi } from '@/services/api/server';
+import { colors, layout, palette, radii, spacing, typography } from '@/theme';
+import type { ConsultationRow } from '@/types';
+
+interface Msg {
+  id: string;
+  who: 'user' | 'ai';
+  text: string;
+  source?: string;
+}
+
+const SUGGESTIONS = [
+  'I feel dizzy and nauseous',
+  'What are my medications today?',
+  'Home remedies for cough',
+  'When was my last consultation?',
+];
+
+/**
+ * AI Health Assistant. Symptom questions → AgapAI's home-remedy engine;
+ * government/general questions → live eGov AI; questions about your own
+ * medications/consultations are answered on-device only.
+ */
+export default function AssistantScreen() {
+  const { session } = useAuth();
+  const { medications, todaysDoses } = useMedications();
+  const { speaking, toggle, speak, stop } = useSpeech();
+  const [messages, setMessages] = useState<Msg[]>([
+    {
+      id: 'hello',
+      who: 'ai',
+      text: `Kumusta${session?.user ? `, ${session.user.firstName}` : ''}! I'm your AgapAI assistant. Tell me how you're feeling (like "masakit ang ulo ko"), or ask about your medicines and past consultations.`,
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const consultRef = useRef<ConsultationRow[] | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    serverApi
+      .listConsultations()
+      .then(({ consultations }) => {
+        consultRef.current = consultations;
+      })
+      .catch(() => {
+        consultRef.current = [];
+      });
+  }, []);
+
+  /** Personal-data questions answered on-device — this data never leaves the phone. */
+  const localAnswer = useCallback(
+    (q: string): string | null => {
+      const p = q.toLowerCase();
+      const asksMeds = /\b(medication|medications|medicine|medicines|meds|gamot|reseta|pill)\b/.test(p);
+      const asksConsult = /\b(consultation|check-?up|doctor visit|last visit|nakaraang konsulta|konsulta)\b/.test(p);
+
+      if (asksMeds) {
+        if (medications.length === 0)
+          return 'You have no medicines saved yet. Add one from the Meds tab and I can remind you about it!';
+        const today = todaysDoses
+          .map(
+            (d) =>
+              `• ${d.medication.name} (${d.medication.dosage}${d.medication.unit ? ` ${d.medication.unit}` : ''}) at ${new Date(d.dose.scheduledAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
+          )
+          .join('\n');
+        return `Here are your medicines for today (from this phone only):\n\n${today || '• Nothing scheduled today'}\n\nYou have ${medications.length} medicine${medications.length === 1 ? '' : 's'} saved in total.`;
+      }
+
+      if (asksConsult) {
+        const list = consultRef.current ?? [];
+        if (list.length === 0) return "I don't see any consultations on record yet. After your next visit, your doctor will upload one securely.";
+        const last = list[0];
+        return `Your most recent consultation was a "${last.type}" with Dr. ${last.doctor?.firstName ?? ''} ${last.doctor?.lastName ?? ''} on ${new Date(last.date).toLocaleDateString()}. Open Records → Consultations to read the full encrypted record. You have ${list.length} consultation${list.length === 1 ? '' : 's'} in total.`;
+      }
+
+      return null;
+    },
+    [medications, todaysDoses],
+  );
+
+  const send = useCallback(
+    async (raw?: string) => {
+      const text = (raw ?? input).trim();
+      if (!text || busy) return;
+      setInput('');
+      setMessages((m) => [...m, { id: `u${Date.now()}`, who: 'user', text }]);
+      setBusy(true);
+      try {
+        const local = localAnswer(text);
+        const reply = local
+          ? { reply: local, source: 'on-device' }
+          : await serverApi.askAssistant(text, session?.user.firstName);
+        setMessages((m) => [
+          ...m,
+          { id: `a${Date.now()}`, who: 'ai', text: reply.reply, source: reply.source },
+        ]);
+        if (voiceOn) speak(reply.reply.replace(/[•⚠]/g, ''));
+      } catch (err) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: `e${Date.now()}`,
+            who: 'ai',
+            text:
+              err instanceof Error && err.message.includes('server')
+                ? err.message
+                : 'Sorry, I had trouble answering. Please check your connection and try again.',
+          },
+        ]);
+      } finally {
+        setBusy(false);
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+      }
+    },
+    [input, busy, localAnswer, session, voiceOn, speak],
+  );
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
+    >
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+        showsVerticalScrollIndicator={false}
+      >
+        {messages.map((m) => (
+          <View
+            key={m.id}
+            style={[styles.bubble, m.who === 'user' ? styles.userBubble : styles.aiBubble]}
+          >
+            <AppText variant="body" color={m.who === 'user' ? 'inverse' : 'primary'}>
+              {m.text}
+            </AppText>
+            {m.source ? (
+              <AppText variant="caption" color={m.who === 'user' ? 'inverse' : 'muted'} style={styles.source}>
+                {m.source === 'gemini'
+                  ? 'via Gemini AI'
+                  : m.source === 'egov-ai'
+                    ? 'via eGov AI'
+                    : m.source === 'on-device'
+                      ? 'answered on your phone only'
+                      : 'AgapAI health guide'}
+              </AppText>
+            ) : null}
+          </View>
+        ))}
+        {busy ? (
+          <View style={[styles.bubble, styles.aiBubble]}>
+            <AppText variant="body" color="secondary">
+              Thinking…
+            </AppText>
+          </View>
+        ) : null}
+
+        <View style={styles.suggestions}>
+          {SUGGESTIONS.map((s) => (
+            <Pressable key={s} onPress={() => void send(s)} style={styles.suggestion}>
+              <AppText variant="caption" color="accent">
+                {s}
+              </AppText>
+            </Pressable>
+          ))}
+        </View>
+      </ScrollView>
+
+      <View style={styles.inputRow}>
+        <Pressable
+          onPress={() => {
+            if (speaking) stop();
+            setVoiceOn((v) => !v);
+          }}
+          style={[styles.voiceBtn, voiceOn && styles.voiceOn]}
+          accessibilityRole="button"
+          accessibilityLabel={voiceOn ? 'Voice replies on' : 'Voice replies off'}
+          accessibilityHint="Toggles whether replies are spoken aloud"
+        >
+          <Ionicons
+            name={voiceOn ? 'volume-high' : 'volume-mute'}
+            size={22}
+            color={voiceOn ? colors.onPrimary : colors.textSecondary}
+          />
+        </Pressable>
+        <TextInput
+          value={input}
+          onChangeText={setInput}
+          placeholder="How are you feeling?"
+          placeholderTextColor={colors.textMuted}
+          style={styles.input}
+          multiline
+          accessibilityLabel="Message the assistant"
+          onSubmitEditing={() => void send()}
+        />
+        <Pressable
+          onPress={() => void send()}
+          disabled={busy || !input.trim()}
+          style={[styles.sendBtn, (busy || !input.trim()) && styles.sendDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
+        >
+          <Ionicons name="arrow-up" size={22} color={colors.onPrimary} />
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.background },
+  scroll: { padding: layout.screenPadding, gap: spacing.md, paddingBottom: spacing.xl },
+  bubble: { maxWidth: '86%', borderRadius: radii.lg, padding: spacing.lg, gap: spacing.xs },
+  userBubble: { alignSelf: 'flex-end', backgroundColor: colors.primary, borderBottomRightRadius: radii.sm },
+  aiBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surfaceMuted,
+    borderBottomLeftRadius: radii.sm,
+  },
+  source: { marginTop: spacing.xs, opacity: 0.8 },
+  suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
+  suggestion: {
+    borderWidth: 1.5,
+    borderColor: palette.blue100,
+    backgroundColor: palette.blue50,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  voiceBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+  },
+  voiceOn: { backgroundColor: colors.accent },
+  input: {
+    ...typography.body,
+    flex: 1,
+    maxHeight: 120,
+    minHeight: 48,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+  },
+  sendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  sendDisabled: { opacity: 0.4 },
+});

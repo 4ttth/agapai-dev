@@ -1,57 +1,77 @@
-name: Build Android APK
+name: Build Android APKs (Patient + Pro)
 
-on: 
-  workflow_dispatch: # Allows you to manually trigger the build
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Server URL baked into the apps (e.g. http://203.0.113.10:4000). Falls back to the AGAPAI_API_URL repo variable.'
+        required: false
+        type: string
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: AgapAI-Patient
+            dir: .
+          - app: AgapAI-Pro
+            dir: pro-app
+    env:
+      # Baked into the JS bundle at build time — standalone apps can't auto-discover a dev server.
+      EXPO_PUBLIC_API_URL: ${{ inputs.api_url || vars.AGAPAI_API_URL }}
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17' # Required by Expo SDK 50+
-          
+          java-version: '17'
+
       - name: Install dependencies
+        working-directory: ${{ matrix.dir }}
+        # .npmrc in each app handles legacy-peer-deps=true
         run: npm install
-        
+
       - name: Generate native Android project
+        working-directory: ${{ matrix.dir }}
         run: npx expo prebuild --platform android
-        
+
       - name: Build Release APK
+        working-directory: ${{ matrix.dir }}/android
+        run: ./gradlew assembleRelease
+
+      - name: Sign APK for sideloading (debug keystore)
+        working-directory: ${{ matrix.dir }}
         run: |
-          cd android
-          ./gradlew assembleRelease
-          
-      - name: Sign APK for Sideloading
-        run: |
-          # Install Android APK Signer
-          sudo apt-get install -y apksigner
-          
-          # Find the compiled unsigned APK
+          sudo apt-get update && sudo apt-get install -y apksigner
+
+          # Prebuild templates differ: some emit app-release-unsigned.apk, some a debug-signed app-release.apk.
           APK_PATH=$(find android/app/build/outputs/apk/release -name "*-unsigned.apk" | head -n 1)
-          
-          # Sign the Release APK with React Native's default debug keystore
-          apksigner sign --ks android/app/debug.keystore \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --ks-key-alias androiddebugkey \
-            $APK_PATH
-            
-          # Rename for a clean download
-          mv $APK_PATH android/app/build/outputs/apk/release/AgapAIHealth.apk
-          
+          if [ -n "$APK_PATH" ]; then
+            apksigner sign --ks android/app/debug.keystore \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              --ks-key-alias androiddebugkey \
+              "$APK_PATH"
+          else
+            APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          fi
+
+          mv "$APK_PATH" "${{ matrix.app }}.apk"
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: android/app/build/outputs/apk/release/AgapAIHealth.apk
+          name: ${{ matrix.app }}-android
+          path: ${{ matrix.dir }}/${{ matrix.app }}.apk

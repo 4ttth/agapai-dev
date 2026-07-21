@@ -3,13 +3,13 @@
  * implementation — so swapping mocks for real government APIs is a one-line
  * change per service.
  */
+import { syncedMedicationService } from './api/syncedMedicationService';
 import { authService } from './mock/authService';
 import { healthProfileService } from './mock/healthProfileService';
-import { medicationService } from './mock/medicationService';
 
 export const services = {
   auth: authService,
-  medication: medicationService,
+  medication: syncedMedicationService,
   healthProfile: healthProfileService,
 } as const;
 

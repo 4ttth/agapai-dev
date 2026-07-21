@@ -1,148 +1,88 @@
 # AgapAI Health
 
-A mobile healthcare app that simplifies healthcare access for Filipinos —
-designed for **elderly users** and caregivers, and built to feel like a natural
-extension of the **eGovPH SuperApp**. React Native + Expo + TypeScript.
+Healthcare access for every Filipino, built on **eGovPH**. React Native + Expo +
+TypeScript, with a Node.js/Postgres backend that proxies the live eGov APIs.
 
-> **Phase 1 scope:** complete app architecture + one deep, end-to-end feature
-> (the **Visual Pill Tracker**), plus a mocked eGovPH SSO login and a QR
-> **Health ID** share/scan flow. The four remaining modules (e-Document Scanner,
-> full Universal Health Profile editing, Smart Consultation Logs, AI Voice
-> Assistant) are scaffolded to follow the same proven pattern.
+**The ecosystem (this repo):**
 
----
+| Piece | Where | What it does |
+| --- | --- | --- |
+| **Patient app** | repo root | eGov SSO sign-in, one-time Health ID registration, medication tracker + SMS reminders, end-to-end-encrypted consultation records, offline document scanner, mood calendar, AI health assistant (voice replies) |
+| **AgapAI Pro** | `pro-app/` | Doctors: scan Health ID → upload client-side-encrypted consultations (text/voice notes, typed or scanned prescriptions). Pharmacists: scan Health ID → decrypt latest prescription → dispense checklist that syncs to the patient |
+| **Server** | `server/` | Express + Prisma/Postgres. Proxies eGov SSO / eVerify / eMessage / eGov AI (secrets never ship in apps), stores encrypted records, runs the SMS reminder cron, serves the admin console |
+| **Admin console** | `http://<server>:4000/admin` | Service health (live pings of all 4 eGov APIs + DB), usage metrics, manual PRC license verification of doctors/pharmacists, user registry |
 
-## Getting started
+## The encryption story (why judges should care)
+
+1. At registration the **patient's device** generates a random 256-bit key. It
+   lives only on the phone and inside the **Health ID QR**.
+2. A doctor scans the QR, writes the consultation, and taps *Finalize* — the
+   record is **AES-256 encrypted on the doctor's device** with a key derived
+   from the patient's key + a random salt.
+3. The server stores **only ciphertext**. Doctor (after upload), server, and
+   eGov can never read it again.
+4. The patient's app decrypts locally. A pharmacist decrypts only when the
+   patient physically presents their QR. **The patient owns the data.**
+
+## eGov integrations (live, via the server)
+
+- **eGov SSO** — sign-in identity + registry check (demo mode mirrors the same
+  response shape; live exchange endpoint is wired at `POST /api/auth/sso/exchange`).
+- **eVerify** — National ID QR check gates editing of personal information.
+- **eMessage** — cron texts each patient 1 hour before their first dose: first
+  two medicines of the day + "open AgapAI for the rest".
+- **AI assistant** — **Gemini** (`GEMINI_API_KEY`) is the primary engine with a
+  safety-framed health prompt; if unset or failing, a curated AgapAI home-remedy
+  engine answers symptom questions and **eGov AI** answers government/general
+  questions (it declines medical topics). Questions about *your* meds and
+  consultations are answered **on-device only**.
+
+## Run it
 
 ```bash
-npm install
-npx expo start
+# server (needs Postgres; see server/.env.example)
+cd server && npm install && npx prisma db push && npm start
+
+# patient app
+npm install && npx expo start --port 8085
+
+# pro app
+cd pro-app && npm install && npx expo start --port 8082
 ```
 
-Then open the project in **Expo Go** (scan the QR) or an Android/iOS simulator.
+Open in **Expo Go**. Apps auto-discover the server on the Expo dev machine at
+port 4000, or set `EXPO_PUBLIC_API_URL=http://<vps>:4000`. Full VPS deployment:
+see [DEPLOY.md](DEPLOY.md).
 
-> This repo uses `.npmrc` with `legacy-peer-deps=true` because Expo Router's web
-> dependencies declare a stricter React peer than the pinned React version.
-> Installs go through `npx expo install` to keep native module versions aligned
-> with the Expo SDK.
+`npm test` (32 tests) and `npm run typecheck` pass in the patient app;
+`npm run typecheck` passes in `pro-app/`.
 
-### Scripts
+## Demo walkthrough
 
-| Command | What it does |
-| --- | --- |
-| `npm start` | Start the Expo dev server |
-| `npm run android` / `ios` / `web` | Start on a specific platform |
-| `npm test` | Run the Jest unit + component suite |
-| `npm run typecheck` | `tsc --noEmit` (strict mode) |
+1. **Patient phone:** sign in with eGovPH (any demo identity) → complete the
+   Health ID registration (blood type, allergies, conditions, emergency
+   contact, consent) → land on the redesigned Home (mood calendar, meds due,
+   center quick-action button).
+2. **Doctor phone (Pro app):** sign in → register as Doctor → *pending*.
+3. **Admin:** `http://<server>:4000/admin` → verify the doctor with a PRC No.
+   (cross-check at verification.prc.gov.ph).
+4. **Doctor:** scan the patient's Health ID QR → allergies pop up → write
+   notes or record a voice note → type prescriptions (or scan paper, flagged
+   as not recommended) → **Finalize & upload encrypted**.
+5. **Patient:** Records → consultation decrypts on-device → *Add all to My
+   Medicines* → reminders scheduled, schedule synced for SMS.
+6. **Pharmacist (Pro app):** register → admin verifies → scan the same QR →
+   latest prescription decrypts → dispense 30× Losartan → it appears in the
+   patient's Home under "From the pharmacy".
+7. **Assistant:** "Nahihilo ako at naduduwal" → spoken home-remedy guidance;
+   "What are my medications today?" → answered from the phone only.
 
----
+## Architecture notes
 
-## Architecture
-
-```
-app/          Expo Router routes (thin screens only)
-components/    Reusable UI — ui/ (design system), states/, qr/
-features/     Feature modules: pill-tracker/, health-profile/
-              (each owns its components, hooks, and domain logic)
-hooks/        Cross-cutting hooks (useAuth, useSpeech)
-providers/    App-wide React Context providers
-services/     Data layer — api/ (interfaces) + mock/ (implementations)
-types/        Shared TypeScript types
-utils/        Pure helpers (datetime, validation, notifications, storage)
-constants/    Config + storage keys
-theme/        Design tokens (colors, spacing, radii, typography)
-```
-
-**Separation of concerns:** screens render; feature hooks hold state; services
-own data; `utils` are pure and unit-tested. UI never imports a concrete service
-— only the `services` registry, so implementations can be swapped freely.
-
-### Design system
-
-- **Typography** — Lexend for titles/headings, Inter for body/labels/buttons,
-  routed through `components/ui/AppText` (`variant` prop). Font scaling stays on
-  so OS text-size settings are respected.
-- **Color** — calm, government-grade palette with documented **WCAG AA** contrast
-  (`theme/colors.ts`). No neon, no gradients.
-- **Touch targets** — 48pt minimum; primary buttons are 56pt.
-- Every screen renders **Loading / Empty / Error / Content** states, and every
-  interactive element has an accessibility label/role/hint.
-
----
-
-## eGovPH integration (mocked)
-
-Government integration is mocked behind clean interfaces so the UX looks real
-today and swaps to live APIs later with **no UI changes**:
-
-- **SSO / Digital ID** — `services/mock/authService.ts` returns an
-  `EgovSession`; the login screen calls `signIn()`.
-- **QR Health ID** — the profile screen renders a QR encoding a
-  `HealthSharePayload`; `app/scan.tsx` represents the clinic-side scan.
-
----
-
-## Replacing a mock with a real API
-
-1. Implement the interface in `services/api/types.ts` (e.g. `MedicationService`)
-   against the real endpoint — put it in `services/api/`.
-2. Swap the one line in `services/index.ts`:
-
-   ```ts
-   // Before
-   import { medicationService } from './mock/medicationService';
-   // After
-   import { medicationService } from './api/medicationService';
-   ```
-
-3. Done. Screens, hooks, and components are untouched because they depend only
-   on the `services` registry and the shared types.
-
-Mock behavior is tunable in `constants/config.ts`:
-`mockLatencyMs` (loading realism) and `simulateServiceError` (exercise error
-states during QA).
-
----
-
-## Testing
-
-`npm test` runs Jest (`jest-expo` preset) with `@testing-library/react-native`.
-
-- **Unit** — pill-tracker domain logic (`logic.test.ts`), form validation, and
-  datetime helpers. These are pure functions and cover the core behavior:
-  dose materialization, taken/missed derivation, next-dose selection.
-- **Service** — `medicationService.test.ts` verifies seeding, add/remove, and
-  idempotent dose-log upserts against the AsyncStorage mock.
-- **Component** — `Button` and `DoseRow` cover rendering, interaction, and
-  disabled/loading states.
-
-### Recommended additions as the app grows
-
-- **Integration** — render a screen inside `AppProviders` and drive the
-  add-medication → reminder → “I Took This” flow.
-- **Accessibility** — assert labels/roles on new components; manually verify
-  with VoiceOver/TalkBack and at 200% OS font scale.
-- **Edge cases** — timezone boundaries for schedules, empty/large medication
-  lists, denied camera/notification permissions.
-
----
-
-## Manual verification checklist
-
-1. Launch → **eGovPH SSO** login → Home.
-2. **Add a medicine** → it appears on Home; a local reminder is scheduled.
-3. Tap **“I Took This”** → dose logs as taken and **persists across app restart**.
-4. Open a medicine → **Read aloud** speaks the dose and instructions.
-5. **Health ID** tab → show the QR; open **Scan a Health ID** → scan it back to a
-   profile summary.
-6. Set `simulateServiceError: true` in `constants/config.ts` → confirm error
-   states render.
-
----
-
-## Not included in Phase 1
-
-Backend/auth servers, databases, and real government API wiring. e-Document
-Scanner (AI extraction), full health-profile editing, consultation timeline, and
-the conversational AI Voice Assistant are planned for later phases and follow the
-same `features/` + `services/` pattern established here.
+- `services/` registry pattern: screens depend on interfaces; the medication
+  service is **local-first** (AsyncStorage, works offline) with background sync
+  to the server for the SMS cron and pharmacist dispensing.
+- Design system: Lexend/Inter, WCAG-AA palette, 48pt+ touch targets, animated
+  (spring) entrances, gradient heroes, center FAB quick actions — modern but
+  elderly-first.
+- Scanned documents are resized + recompressed and stored **offline only**.
