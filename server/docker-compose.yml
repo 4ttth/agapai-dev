@@ -7,8 +7,13 @@ services:
       POSTGRES_DB: agapai
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - '5432:5432'
+    # No host port mapping on purpose: the API reaches this container as db:5432
+    # over the compose network, so an existing Postgres on the host can't conflict.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d agapai']
+      interval: 3s
+      timeout: 3s
+      retries: 20
   api:
     build: .
     restart: unless-stopped
@@ -18,7 +23,8 @@ services:
     ports:
       - '4000:4000'
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:
