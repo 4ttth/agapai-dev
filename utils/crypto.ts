@@ -27,12 +27,22 @@ export interface EncryptedRecord {
   salt: string;
 }
 
-export function encryptRecord(payload: DecryptedConsultation, patientKey: string): EncryptedRecord {
-  const salt = CryptoJS.lib.WordArray.random(16).toString();
-  const iv = CryptoJS.lib.WordArray.random(16);
+export async function encryptRecord(
+  payload: DecryptedConsultation,
+  patientKey: string,
+): Promise<EncryptedRecord> {
+  // crypto-js's WordArray.random needs crypto.getRandomValues (absent in RN),
+  // so salt + IV come from expo-crypto's native CSPRNG instead.
+  const toHex = (arr: Uint8Array) =>
+    Array.from(arr)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  const salt = toHex(await Crypto.getRandomBytesAsync(16));
+  const ivHex = toHex(await Crypto.getRandomBytesAsync(16));
+  const iv = CryptoJS.enc.Hex.parse(ivHex);
   const key = CryptoJS.SHA256(patientKey + salt);
   const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(payload), key, { iv }).toString();
-  return { ciphertext, iv: iv.toString(), salt };
+  return { ciphertext, iv: ivHex, salt };
 }
 
 export function decryptRecord(

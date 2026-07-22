@@ -114,7 +114,7 @@ export default function NewConsultationScreen() {
     setBusy(true);
     try {
       // End-to-end encryption with the key from the patient's own QR.
-      const enc = encryptRecord(
+      const enc = await encryptRecord(
         {
           description: description.trim(),
           voiceB64: voiceB64 ?? undefined,
