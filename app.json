@@ -11,6 +11,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "AgapAI uses the camera to scan health QR codes so clinic staff can view your medical profile.",
+        "NSMicrophoneUsageDescription": "AgapAI uses the microphone so you can talk with the health assistant.",
+        "NSPhotoLibraryUsageDescription": "AgapAI lets you upload a photo of your National ID QR code or a medical document when your camera is unavailable.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -52,6 +54,18 @@
         "expo-image-picker",
         {
           "photosPermission": "AgapAI lets you upload a photo of your National ID QR code when your camera is unavailable."
+        }
+      ],
+      [
+        "react-native-audio-api",
+        {
+          "iosMicrophonePermission": "AgapAI uses the microphone so you can talk with the health assistant.",
+          "iosBackgroundMode": false,
+          "androidPermissions": ["android.permission.RECORD_AUDIO"],
+          "androidForegroundService": false,
+          "androidFSTypes": [],
+          "disableFFmpeg": true,
+          "disableStaticExternalLibs": false
         }
       ],
       [

@@ -6,6 +6,11 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+/** The Live voice socket authenticates via query param, not a header. */
+export function getAuthToken() {
+  return authToken;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {

@@ -14,6 +14,7 @@ import {
 import { AppText } from '@/components/ui/AppText';
 import { useMedications } from '@/features/pill-tracker';
 import { useAuth } from '@/hooks/useAuth';
+import { useGeminiLive } from '@/hooks/useGeminiLive';
 import { useSpeech } from '@/hooks/useSpeech';
 import { serverApi } from '@/services/api/server';
 import { colors, layout, palette, radii, spacing, typography } from '@/theme';
@@ -42,6 +43,7 @@ export default function AssistantScreen() {
   const { session } = useAuth();
   const { medications, todaysDoses } = useMedications();
   const { speaking, toggle, speak, stop } = useSpeech();
+  const live = useGeminiLive();
   const [messages, setMessages] = useState<Msg[]>([
     {
       id: 'hello',
@@ -235,6 +237,29 @@ export default function AssistantScreen() {
         </View>
       </ScrollView>
 
+      {live.state !== 'idle' ? (
+        <View style={[styles.liveBar, live.state === 'error' && styles.liveBarError]}>
+          <Ionicons
+            name={
+              live.state === 'live' ? (live.speaking ? 'volume-high' : 'mic') : live.state === 'error' ? 'warning' : 'ellipsis-horizontal'
+            }
+            size={18}
+            color={colors.onPrimary}
+          />
+          <AppText variant="caption" color="inverse" style={styles.flex}>
+            {live.state === 'connecting'
+              ? 'Connecting to the voice assistant…'
+              : live.state === 'error'
+                ? (live.error ?? 'Voice assistant unavailable.')
+                : live.speaking
+                  ? 'Assistant is speaking — you can interrupt anytime'
+                  : 'Listening… just speak naturally'}
+          </AppText>
+          <Pressable onPress={live.stop} accessibilityRole="button" accessibilityLabel="End voice call">
+            <Ionicons name="close-circle" size={22} color={colors.onPrimary} />
+          </Pressable>
+        </View>
+      ) : null}
       {docText ? (
         <View style={styles.docChip}>
           <Ionicons name="document-text" size={18} color={colors.success} />
@@ -268,6 +293,26 @@ export default function AssistantScreen() {
             name={voiceOn ? 'volume-high' : 'volume-mute'}
             size={22}
             color={voiceOn ? colors.onPrimary : colors.textSecondary}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            if (live.state === 'live' || live.state === 'connecting') {
+              live.stop();
+            } else {
+              stop(); // silence text-to-speech before opening the mic
+              void live.start(docText ?? undefined);
+            }
+          }}
+          style={[styles.attachBtn, live.state === 'live' && styles.talkActive]}
+          accessibilityRole="button"
+          accessibilityLabel={live.state === 'live' ? 'End voice conversation' : 'Talk to the assistant'}
+          accessibilityHint="Starts a live voice conversation with the AgapAI assistant"
+        >
+          <Ionicons
+            name={live.state === 'live' ? 'stop-circle' : 'call'}
+            size={22}
+            color={live.state === 'live' ? colors.onPrimary : colors.textSecondary}
           />
         </Pressable>
         <Pressable
@@ -321,6 +366,16 @@ const styles = StyleSheet.create({
   source: { marginTop: spacing.xs, opacity: 0.8 },
   flex: { flex: 1 },
   attachBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  talkActive: { backgroundColor: colors.danger, borderRadius: radii.pill },
+  liveBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.primary,
+  },
+  liveBarError: { backgroundColor: colors.danger },
   docChip: {
     flexDirection: 'row',
     alignItems: 'center',
