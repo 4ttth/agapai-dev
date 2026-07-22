@@ -36,6 +36,35 @@ export function requireAuth(req, res, next) {
   next();
 }
 
+/** Short-lived signed ticket carrying a server-verified eVerify identity. */
+export function issueTicket(identity) {
+  const payload = Buffer.from(
+    JSON.stringify({ kind: 'identity', identity, exp: Date.now() + 1000 * 60 * 15 }),
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+export function readTicket(ticket) {
+  const data = verifyRaw(ticket);
+  if (!data || data.kind !== 'identity' || data.exp < Date.now()) return null;
+  return data.identity;
+}
+
+function verifyRaw(token) {
+  if (!token) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)))
+    return null;
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString());
+  } catch {
+    return null;
+  }
+}
+
 export function requireAdmin(req, res, next) {
   const key = req.headers['x-admin-key'] || req.query.key;
   if (key !== process.env.ADMIN_KEY) return res.status(401).json({ error: 'Bad admin key' });

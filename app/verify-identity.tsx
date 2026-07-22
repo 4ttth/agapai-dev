@@ -22,12 +22,14 @@ export default function VerifyIdentityScreen() {
   const { session, updateUser } = useAuth();
   const [phase, setPhase] = useState<Phase>('intro');
   const [message, setMessage] = useState<string | null>(null);
+  const [score, setScore] = useState<number | null>(null);
 
   const onScanned = useCallback(
     async (value: string) => {
       setPhase('verifying');
       try {
-        await serverApi.everifyQrCheck(value);
+        const result = await serverApi.everifyQrCheck(value);
+        setScore(result.score);
         const { user } = await serverApi.me();
         await updateUser(user);
         setPhase('done');
@@ -81,7 +83,8 @@ export default function VerifyIdentityScreen() {
             Identity verified!
           </AppText>
           <AppText variant="body" color="secondary" center>
-            {session?.user.firstName}, you can now edit your personal information.
+            {session?.user.firstName}, your National ID matched your Health ID
+            {score != null ? ` at ${score}%` : ''} — you can now edit your personal information.
           </AppText>
           <Button label="Edit my information" onPress={() => router.replace('/edit-profile')} />
         </View>

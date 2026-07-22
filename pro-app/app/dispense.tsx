@@ -20,7 +20,8 @@ interface DispenseRow {
 /** Pharmacist: fetch latest prescription, decrypt with the QR key, dispense + sync. */
 export default function DispenseScreen() {
   const router = useRouter();
-  const scanned = getScannedPatient();
+  // Snapshot at mount: clearing the store after dispensing must not blank this screen.
+  const [scanned] = useState(getScannedPatient);
   const [row, setRow] = useState<ConsultationRow | null>(null);
   const [record, setRecord] = useState<DecryptedConsultation | null>(null);
   const [items, setItems] = useState<DispenseRow[]>([]);

@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { TextField } from '@/components/ui/Field';
 import { Screen } from '@/components/ui/Screen';
@@ -24,13 +26,6 @@ const CONDITION_OPTIONS = [
   'Arthritis',
   'Cancer',
 ];
-
-const title = (s: string) =>
-  s
-    .toLowerCase()
-    .split(' ')
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(' ');
 
 function MultiSelect({
   options,
@@ -65,48 +60,52 @@ function MultiSelect({
   );
 }
 
-/** First-time registration — the answers become the patient's Health ID. */
+/**
+ * First-time registration. Identity (name, birth date) is locked to what
+ * eVerify returned from the National ID — only health details are asked.
+ */
 export default function RegisterScreen() {
   const router = useRouter();
-  const { pendingEgov, register, signingIn, error, status } = useAuth();
+  const { pending, register, signingIn, error, status } = useAuth();
+  const identity = pending?.identity;
 
-  const [firstName, setFirstName] = useState('');
-  const [middleName, setMiddleName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [suffix, setSuffix] = useState('');
   const [bloodType, setBloodType] = useState<BloodType | null>(null);
   const [allergies, setAllergies] = useState<string[]>([]);
   const [allergyOther, setAllergyOther] = useState('');
   const [conditions, setConditions] = useState<string[]>([]);
   const [conditionOther, setConditionOther] = useState('');
+  const [mobile, setMobile] = useState('+639');
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('+639');
   const [agreed, setAgreed] = useState(false);
   const [touched, setTouched] = useState(false);
 
   useEffect(() => {
-    if (pendingEgov) {
-      setFirstName(title(pendingEgov.first_name ?? ''));
-      setMiddleName(title(pendingEgov.middle_name ?? ''));
-      setLastName(title(pendingEgov.last_name ?? ''));
-    }
-  }, [pendingEgov]);
-
-  useEffect(() => {
     if (status === 'signedOut') router.replace('/(auth)/login');
   }, [status, router]);
 
+  useEffect(() => {
+    if (identity?.bloodType) {
+      const match = BLOOD_TYPES.find((b) => b.toLowerCase() === identity.bloodType?.toLowerCase());
+      if (match) setBloodType(match);
+    }
+    if (identity?.mobile) {
+      const m = identity.mobile.replace(/^0/, '+63').replace(/^63/, '+63');
+      if (/^\+639\d{9}$/.test(m)) setMobile(m);
+    }
+  }, [identity]);
+
   const phoneOk = /^\+639\d{9}$/.test(emergencyPhone.trim());
+  const mobileOk = /^\+639\d{9}$/.test(mobile.trim());
   const errors = useMemo(
     () => ({
-      firstName: firstName.trim() ? undefined : 'First name is required',
-      lastName: lastName.trim() ? undefined : 'Last name is required',
       bloodType: bloodType ? undefined : 'Please choose your blood type',
+      mobile: mobileOk ? undefined : 'Use the format +639XXXXXXXXX',
       emergencyName: emergencyName.trim() ? undefined : 'Emergency contact name is required',
       emergencyPhone: phoneOk ? undefined : 'Use the format +639XXXXXXXXX',
       agreed: agreed ? undefined : 'Please agree to continue',
     }),
-    [firstName, lastName, bloodType, emergencyName, phoneOk, agreed],
+    [bloodType, mobileOk, emergencyName, phoneOk, agreed],
   );
   const valid = Object.values(errors).every((e) => !e);
 
@@ -124,13 +123,10 @@ export default function RegisterScreen() {
     if (!valid) return;
     try {
       await register({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        middleName: middleName.trim() || undefined,
-        suffix: suffix.trim() || undefined,
         bloodType: bloodType ?? undefined,
         allergies: [...allergies, ...splitOthers(allergyOther)],
         conditions: [...conditions, ...splitOthers(conditionOther)],
+        mobile: mobile.trim(),
         emergencyName: emergencyName.trim(),
         emergencyPhone: emergencyPhone.trim(),
       });
@@ -139,15 +135,35 @@ export default function RegisterScreen() {
     }
   };
 
+  if (!identity) return null;
+
+  const fullName = [identity.firstName, identity.middleName, identity.lastName, identity.suffix]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <Screen>
       <View style={styles.header}>
         <AppText variant="title">Create your Health ID</AppText>
         <AppText variant="body" color="secondary">
-          One-time registration. Your eGovPH identity is verified — just complete your health
-          details below.
+          Your identity is confirmed by eVerify — just complete your health details below.
         </AppText>
       </View>
+
+      <Card style={styles.identityCard}>
+        <View style={styles.identityRow}>
+          <View style={styles.identityIcon}>
+            <Ionicons name="shield-checkmark" size={24} color={colors.onPrimary} />
+          </View>
+          <View style={styles.flex}>
+            <AppText variant="section">{fullName}</AppText>
+            <AppText variant="caption" color="secondary">
+              {identity.birthDate ? `Born ${identity.birthDate} · ` : ''}from your National ID
+            </AppText>
+          </View>
+        </View>
+        <Badge label="Verified via eVerify (PhilSys)" tone="success" />
+      </Card>
 
       {error ? (
         <View style={styles.errorBox} accessibilityRole="alert">
@@ -159,23 +175,6 @@ export default function RegisterScreen() {
       ) : null}
 
       <View style={styles.form}>
-        <TextField
-          label="First name"
-          required
-          value={firstName}
-          onChangeText={setFirstName}
-          error={touched ? errors.firstName : undefined}
-        />
-        <TextField label="Middle name" value={middleName} onChangeText={setMiddleName} />
-        <TextField
-          label="Last name"
-          required
-          value={lastName}
-          onChangeText={setLastName}
-          error={touched ? errors.lastName : undefined}
-        />
-        <TextField label="Suffix (if any)" placeholder="Jr., Sr., III…" value={suffix} onChangeText={setSuffix} />
-
         <View style={styles.group}>
           <AppText variant="label">Blood type *</AppText>
           <View style={styles.chips}>
@@ -213,6 +212,15 @@ export default function RegisterScreen() {
           onOther={setConditionOther}
         />
 
+        <TextField
+          label="Your mobile number"
+          required
+          keyboardType="phone-pad"
+          value={mobile}
+          onChangeText={setMobile}
+          hint="Used for SMS medication reminders (+639XXXXXXXXX)"
+          error={touched ? errors.mobile : undefined}
+        />
         <TextField
           label="Emergency contact — full name"
           required
@@ -273,7 +281,17 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { gap: spacing.sm, marginBottom: spacing.xl },
+  header: { gap: spacing.sm, marginBottom: spacing.lg },
+  identityCard: { gap: spacing.md, marginBottom: spacing.lg },
+  identityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  identityIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   form: { gap: spacing.xl },
   group: { gap: spacing.md },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

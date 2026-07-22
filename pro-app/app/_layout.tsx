@@ -18,6 +18,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ headerShown: false }} />
+        <Stack.Screen name="scan-login" options={{ title: 'Verify with National ID', presentation: 'modal' }} />
         <Stack.Screen name="doctor" options={{ title: 'AgapAI Pro — Doctor', headerBackVisible: false }} />
         <Stack.Screen name="pharmacist" options={{ title: 'AgapAI Pro — Pharmacist', headerBackVisible: false }} />
         <Stack.Screen name="scan-patient" options={{ title: 'Scan Health ID', presentation: 'modal' }} />

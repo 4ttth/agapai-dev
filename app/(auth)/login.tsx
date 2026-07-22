@@ -23,8 +23,7 @@ const FEATURES = [
  */
 export default function LoginScreen() {
   const router = useRouter();
-  const { signInWithEgov, signingIn, error, status } = useAuth();
-  const [seed, setSeed] = useState('');
+  const { error, status } = useAuth();
   const fade = useRef(new Animated.Value(0)).current;
   const rise = useRef(new Animated.Value(24)).current;
 
@@ -80,31 +79,16 @@ export default function LoginScreen() {
           </View>
         ) : null}
 
-        <View>
-          <AppText variant="label" style={styles.inputLabel}>
-            eGovPH demo identity
-          </AppText>
-          <TextInput
-            value={seed}
-            onChangeText={setSeed}
-            placeholder="e.g. juan (any nickname)"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            style={styles.input}
-            accessibilityLabel="eGovPH demo identity"
-          />
-        </View>
-
         <Button
-          label="Continue with eGovPH"
-          onPress={() => void signInWithEgov(seed.trim() || 'demo')}
-          loading={signingIn}
-          icon={<Ionicons name="shield-checkmark" size={22} color={colors.onPrimary} />}
-          accessibilityHint="Signs you in with your eGovPH Digital ID"
+          label="Verify with my National ID"
+          onPress={() => router.push('/(auth)/scan-id')}
+          icon={<Ionicons name="qr-code" size={22} color={colors.onPrimary} />}
+          accessibilityHint="Opens the camera to scan the QR on your Philippine National ID"
         />
         <AppText variant="caption" color="muted" center style={styles.disclaimer}>
-          eGov SSO verifies your identity, then AgapAI checks for your Health ID. First time here?
-          You&apos;ll register once.
+          Scan the QR on the back of your Philippine National ID. eVerify confirms your identity
+          with PhilSys — your name and birth date come straight from the government record, never
+          typed. First time here? You&apos;ll register once.
         </AppText>
       </Animated.View>
     </Screen>

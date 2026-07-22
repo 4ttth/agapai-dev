@@ -2,7 +2,7 @@ import { createContext, useCallback, useEffect, useMemo, useState, type ReactNod
 
 import { serverApi } from '@/services/api/server';
 import { setAuthToken } from '@/services/api/http';
-import type { AgapaiSession, EgovProfile, ServerUser } from '@/types';
+import type { AgapaiSession, ServerUser, VerifiedIdentity } from '@/types';
 import { makePatientKey } from '@/utils/crypto';
 import { readJson, removeKeys, writeJson } from '@/utils/storage';
 
@@ -12,10 +12,6 @@ const patientKeyStorage = (userId: string) => `agapai/pkey/${userId}`;
 export type AuthStatus = 'initializing' | 'signedOut' | 'registering' | 'signedIn';
 
 interface RegisterInput {
-  firstName: string;
-  lastName: string;
-  middleName?: string;
-  suffix?: string;
   bloodType?: string;
   allergies?: string[];
   conditions?: string[];
@@ -24,15 +20,20 @@ interface RegisterInput {
   mobile?: string;
 }
 
+interface PendingIdentity {
+  identity: VerifiedIdentity;
+  ticket: string;
+}
+
 interface AuthContextValue {
   status: AuthStatus;
   session: AgapaiSession | null;
-  /** eGov profile awaiting first-time registration. */
-  pendingEgov: EgovProfile | null;
+  /** eVerify-confirmed identity awaiting first-time registration. */
+  pending: PendingIdentity | null;
   signingIn: boolean;
   error: string | null;
-  /** eGov SSO (demo mode): verifies identity, then checks the AgapAI registry. */
-  signInWithEgov: (seed: string) => Promise<void>;
+  /** Real eGov verification: sign in by scanning the National ID QR. */
+  signInWithNationalId: (qrValue: string) => Promise<void>;
   /** Complete first-time registration → creates the Health ID. */
   register: (input: RegisterInput) => Promise<void>;
   updateUser: (user: ServerUser) => Promise<void>;
@@ -44,7 +45,7 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('initializing');
   const [session, setSession] = useState<AgapaiSession | null>(null);
-  const [pendingEgov, setPendingEgov] = useState<EgovProfile | null>(null);
+  const [pending, setPending] = useState<PendingIdentity | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,24 +88,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const next: AgapaiSession = { token, user, patientKey };
     await writeJson(SESSION_KEY, next);
     setSession(next);
-    setPendingEgov(null);
+    setPending(null);
     setStatus('signedIn');
   }, []);
 
-  const signInWithEgov = useCallback(
-    async (seed: string) => {
+  const signInWithNationalId = useCallback(
+    async (qrValue: string) => {
       setSigningIn(true);
       setError(null);
       try {
-        const result = await serverApi.mockSso(seed || 'demo');
+        const result = await serverApi.everifyLogin(qrValue);
         if (result.registered && result.user && result.token) {
           await persistSession(result.token, result.user);
-        } else {
-          setPendingEgov(result.egovProfile);
+        } else if (result.ticket) {
+          setPending({ identity: result.identity, ticket: result.ticket });
           setStatus('registering');
+        } else {
+          setError('eVerify did not return a usable identity. Please try again.');
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'We could not connect to eGovPH.');
+        setError(err instanceof Error ? err.message : 'We could not reach eVerify.');
+        throw err;
       } finally {
         setSigningIn(false);
       }
@@ -114,14 +118,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (input: RegisterInput) => {
+      if (!pending) throw new Error('Scan your National ID first.');
       setSigningIn(true);
       setError(null);
       try {
         const { user, token } = await serverApi.register({
-          egovUniqid: pendingEgov?.uniqid,
+          ticket: pending.ticket,
           role: 'PATIENT',
-          birthDate: pendingEgov?.birth_date,
-          mobile: input.mobile ?? pendingEgov?.mobile,
           ...input,
         });
         await persistSession(token, user);
@@ -132,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSigningIn(false);
       }
     },
-    [pendingEgov, persistSession],
+    [pending, persistSession],
   );
 
   const updateUser = useCallback(
@@ -150,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await removeKeys([SESSION_KEY]);
     setAuthToken(null);
     setSession(null);
-    setPendingEgov(null);
+    setPending(null);
     setStatus('signedOut');
   }, []);
 
@@ -158,15 +161,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       session,
-      pendingEgov,
+      pending,
       signingIn,
       error,
-      signInWithEgov,
+      signInWithNationalId,
       register,
       updateUser,
       signOut,
     }),
-    [status, session, pendingEgov, signingIn, error, signInWithEgov, register, updateUser, signOut],
+    [status, session, pending, signingIn, error, signInWithNationalId, register, updateUser, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

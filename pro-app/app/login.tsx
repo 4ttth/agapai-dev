@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSession } from '@/lib/SessionContext';
@@ -9,39 +9,22 @@ import { colors, radii, spacing } from '@/lib/theme';
 import { Banner, Btn, Card, T } from '@/lib/ui';
 import type { Role } from '@/lib/api';
 
-/** eGov SSO sign-in + one-time professional registration (then admin verification). */
+/**
+ * Real eGov verification sign-in: scan your National ID (eVerify), then a
+ * one-time role registration. Names come from the government record only.
+ */
 export default function LoginScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { signIn, registerPro, pendingEgov, session } = useSession();
-  const [seed, setSeed] = useState('');
+  const { registerPro, pending, session } = useSession();
   const [role, setRole] = useState<Role>('DOCTOR');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const doSignIn = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await signIn(seed.trim() || 'demo');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reach eGov SSO.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const doRegister = async () => {
-    if (!firstName.trim() || !lastName.trim()) {
-      setError('First name and last name are required.');
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
-      await registerPro(role, firstName.trim(), lastName.trim());
+      await registerPro(role);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed.');
     } finally {
@@ -54,10 +37,12 @@ export default function LoginScreen() {
     return null;
   }
 
+  const identity = pending?.identity;
+
   return (
     <ScrollView
       style={styles.root}
-      contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.xxl }]}
+      contentContainerStyle={[styles.scroll, { paddingTop: 60 }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
@@ -68,34 +53,41 @@ export default function LoginScreen() {
           AgapAI Pro
         </T>
         <T size={16} color={colors.textSecondary} center>
-          For licensed doctors and pharmacists. Sign in with your eGovPH identity.
+          For licensed doctors and pharmacists. Verify with your Philippine National ID.
         </T>
       </View>
 
       {error ? <Banner text={error} tone="danger" /> : null}
 
-      {!pendingEgov ? (
+      {!identity ? (
         <Card style={styles.card}>
-          <T size={14} weight="600" color={colors.textSecondary}>
-            eGovPH demo identity
-          </T>
-          <TextInput
-            value={seed}
-            onChangeText={setSeed}
-            placeholder="e.g. drsantos"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            style={styles.input}
-          />
-          <Btn label="Continue with eGovPH" onPress={() => void doSignIn()} loading={busy} />
+          <Btn label="Verify with my National ID" onPress={() => router.push('/scan-login')} />
+          <View style={styles.privacyRow}>
+            <Ionicons name="lock-closed" size={13} color={colors.textMuted} />
+            <T size={12} color={colors.textMuted}>
+              eVerify (PhilSys) confirms your identity — nothing is typed by hand.
+            </T>
+          </View>
         </Card>
       ) : (
         <Card style={styles.card}>
-          <T size={18} weight="700">
-            One-time registration
-          </T>
+          <View style={styles.identityRow}>
+            <View style={styles.identityIcon}>
+              <Ionicons name="shield-checkmark" size={22} color={colors.onPrimary} />
+            </View>
+            <View style={styles.flex}>
+              <T size={17} weight="700">
+                {[identity.firstName, identity.middleName, identity.lastName, identity.suffix]
+                  .filter(Boolean)
+                  .join(' ')}
+              </T>
+              <T size={13} color={colors.success}>
+                Verified via eVerify ✓
+              </T>
+            </View>
+          </View>
           <T size={14} color={colors.textSecondary}>
-            eGov identity verified. Choose your profession — an administrator will verify your PRC
+            One-time registration: choose your profession. An administrator will verify your PRC
             license before you can upload or dispense.
           </T>
           <View style={styles.roleRow}>
@@ -119,20 +111,6 @@ export default function LoginScreen() {
               </Pressable>
             ))}
           </View>
-          <TextInput
-            value={firstName}
-            onChangeText={setFirstName}
-            placeholder="First name"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
-          <TextInput
-            value={lastName}
-            onChangeText={setLastName}
-            placeholder="Last name"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
           <Btn label="Register" onPress={() => void doRegister()} loading={busy} />
         </Card>
       )}
@@ -153,16 +131,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: { gap: spacing.lg },
-  input: {
-    fontSize: 17,
-    color: colors.text,
-    minHeight: 54,
-    borderWidth: 1.5,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.surface,
+  privacyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  identityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  identityIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  flex: { flex: 1 },
   roleRow: { flexDirection: 'row', gap: spacing.md },
   roleBtn: {
     flex: 1,

@@ -10,20 +10,31 @@ import {
 
 import { api, loadSession, saveSession, type ProUser, type Role, type Session } from './api';
 
-interface SsoResult {
+export interface VerifiedIdentity {
+  uniqid: string;
+  firstName: string;
+  middleName?: string | null;
+  lastName: string;
+  suffix?: string | null;
+  birthDate?: string | null;
+}
+
+interface EverifyLoginResult {
   registered: boolean;
+  identity: VerifiedIdentity;
   user?: ProUser;
   token?: string;
-  egovProfile: { uniqid: string; first_name: string; last_name: string };
+  ticket?: string;
 }
 
 interface Ctx {
   ready: boolean;
   session: Session | null;
-  /** eGov identity verified but not yet registered in AgapAI. */
-  pendingEgov: SsoResult['egovProfile'] | null;
-  signIn: (seed: string) => Promise<void>;
-  registerPro: (role: Role, firstName: string, lastName: string) => Promise<void>;
+  /** eVerify-confirmed identity awaiting one-time professional registration. */
+  pending: { identity: VerifiedIdentity; ticket: string } | null;
+  /** Real eGov verification: sign in by scanning the National ID QR. */
+  signIn: (qrValue: string) => Promise<void>;
+  registerPro: (role: Role) => Promise<void>;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -33,7 +44,7 @@ const SessionCtx = createContext<Ctx | undefined>(undefined);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const [pendingEgov, setPendingEgov] = useState<SsoResult['egovProfile'] | null>(null);
+  const [pending, setPending] = useState<Ctx['pending']>(null);
 
   useEffect(() => {
     loadSession().then((s) => {
@@ -51,28 +62,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const signIn = useCallback(async (seed: string) => {
-    const result = await api<SsoResult>('/auth/mock-sso', { body: { seed: `pro-${seed}` } });
+  const signIn = useCallback(async (qrValue: string) => {
+    const result = await api<EverifyLoginResult>('/auth/everify-login', {
+      body: { value: qrValue },
+      timeoutMs: 30000,
+    });
     if (result.registered && result.user && result.token) {
       const s = { token: result.token, user: result.user };
       await saveSession(s);
       setSession(s);
+    } else if (result.ticket) {
+      setPending({ identity: result.identity, ticket: result.ticket });
     } else {
-      setPendingEgov(result.egovProfile);
+      throw new Error('eVerify did not return a usable identity.');
     }
   }, []);
 
   const registerPro = useCallback(
-    async (role: Role, firstName: string, lastName: string) => {
+    async (role: Role) => {
+      if (!pending) throw new Error('Scan your National ID first.');
       const { user, token } = await api<{ user: ProUser; token: string }>('/auth/register', {
-        body: { role, firstName, lastName, egovUniqid: pendingEgov?.uniqid },
+        body: { role, ticket: pending.ticket },
       });
       const s = { token, user };
       await saveSession(s);
       setSession(s);
-      setPendingEgov(null);
+      setPending(null);
     },
-    [pendingEgov],
+    [pending],
   );
 
   const refresh = useCallback(async () => {
@@ -86,12 +103,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await saveSession(null);
     setSession(null);
-    setPendingEgov(null);
+    setPending(null);
   }, []);
 
   const value = useMemo(
-    () => ({ ready, session, pendingEgov, signIn, registerPro, refresh, signOut }),
-    [ready, session, pendingEgov, signIn, registerPro, refresh, signOut],
+    () => ({ ready, session, pending, signIn, registerPro, refresh, signOut }),
+    [ready, session, pending, signIn, registerPro, refresh, signOut],
   );
 
   return <SessionCtx.Provider value={value}>{children}</SessionCtx.Provider>;

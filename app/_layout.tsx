@@ -58,6 +58,7 @@ function RootNavigator() {
       }}
     >
       <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/scan-id" options={{ title: 'Verify with National ID', presentation: 'modal' }} />
       <Stack.Screen name="(auth)/register" options={{ title: 'Registration', headerBackVisible: true }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="medication/add" options={{ title: 'Add medicine', presentation: 'modal' }} />

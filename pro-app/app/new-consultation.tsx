@@ -23,7 +23,8 @@ interface RxDraft {
 /** Doctor: compose + client-side-encrypt + upload a consultation record. */
 export default function NewConsultationScreen() {
   const router = useRouter();
-  const scanned = getScannedPatient();
+  // Snapshot at mount: clearing the store after upload must not blank this screen.
+  const [scanned] = useState(getScannedPatient);
 
   const [manila, setManila] = useState<string>('');
   const [type, setType] = useState<(typeof CONSULTATION_TYPES)[number]>(CONSULTATION_TYPES[0]);

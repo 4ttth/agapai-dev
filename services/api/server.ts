@@ -16,10 +16,19 @@ export interface SsoResult {
   token?: string;
 }
 
+export interface EverifyLoginResult {
+  registered: boolean;
+  identity: import('@/types').VerifiedIdentity;
+  user?: ServerUser;
+  token?: string;
+  /** Short-lived signed identity ticket for first-time registration. */
+  ticket?: string;
+}
+
 export const serverApi = {
-  /** Demo-mode eGov SSO (deterministic sandbox identity, same response shape as live). */
-  mockSso(seed: string, names?: { firstName?: string; lastName?: string; mobile?: string }) {
-    return api<SsoResult>('/auth/mock-sso', { body: { seed, ...names } });
+  /** Real eGov verification: resolve a National ID QR through eVerify. */
+  everifyLogin(value: string) {
+    return api<EverifyLoginResult>('/auth/everify-login', { body: { value }, timeoutMs: 30000 });
   },
 
   /** Live eGov SSO: exchange code captured from the SSO redirect. */
@@ -28,13 +37,9 @@ export const serverApi = {
   },
 
   register(input: {
-    egovUniqid?: string;
+    /** Identity comes from the server-issued eVerify ticket — never typed. */
+    ticket: string;
     role: 'PATIENT' | 'DOCTOR' | 'PHARMACIST';
-    firstName: string;
-    lastName: string;
-    middleName?: string;
-    suffix?: string;
-    birthDate?: string;
     mobile?: string;
     bloodType?: string;
     allergies?: string[];
@@ -58,7 +63,7 @@ export const serverApi = {
   },
 
   everifyQrCheck(value: string) {
-    return api<{ verified: boolean; data: Record<string, unknown> }>('/everify/qr-check', {
+    return api<{ verified: boolean; score: number }>('/everify/qr-check', {
       body: { value },
       timeoutMs: 30000,
     });

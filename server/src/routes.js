@@ -10,7 +10,8 @@ import {
   looksLikeRefusal,
   matchHealthTopic,
 } from './healthKb.js';
-import { issueToken, requireAdmin, requireAuth } from './token.js';
+import { issueTicket, issueToken, readTicket, requireAdmin, requireAuth } from './token.js';
+import { matchScore, normalizeIdentity } from './identity.js';
 
 export const api = Router();
 
@@ -109,33 +110,79 @@ api.post(
   }),
 );
 
+/**
+ * Real eGov verification sign-in: the app sends the raw National ID QR value,
+ * the server resolves it through eVerify. Identity fields come exclusively
+ * from the government record — never typed by the user.
+ */
+api.post(
+  '/auth/everify-login',
+  wrap(async (req, res) => {
+    const { value } = req.body;
+    if (!value) return res.status(422).json({ error: 'value (National ID QR) required' });
+    let data;
+    try {
+      data = await everifyQrCheck(value);
+    } catch (err) {
+      console.error('[everify-login] upstream:', err.status, JSON.stringify(err.body ?? {}).slice(0, 300));
+      return res
+        .status(422)
+        .json({ error: 'eVerify could not read this QR. Use the QR on the back of your Philippine National ID.' });
+    }
+    console.log('[everify-login] fields received:', Object.keys(data ?? {}).join(','));
+    const identity = normalizeIdentity(data);
+    if (!identity) return res.status(422).json({ error: 'eVerify returned no usable identity for this QR.' });
+    const user = await prisma.user.findUnique({ where: { egovUniqid: identity.uniqid } });
+    if (user) {
+      return res.json({ registered: true, user: publicUser(user), token: issueToken(user), identity });
+    }
+    // First time: hand back a short-lived signed ticket for registration.
+    res.json({ registered: false, identity, ticket: issueTicket(identity) });
+  }),
+);
+
 api.post(
   '/auth/register',
   wrap(async (req, res) => {
     const b = req.body;
-    if (!b.firstName || !b.lastName) return res.status(422).json({ error: 'firstName and lastName required' });
     const role = ['PATIENT', 'DOCTOR', 'PHARMACIST'].includes(b.role) ? b.role : 'PATIENT';
-    if (b.egovUniqid) {
-      const existing = await prisma.user.findUnique({ where: { egovUniqid: b.egovUniqid } });
+
+    // Real path: identity fields come only from the server-issued eVerify ticket.
+    let identity = null;
+    if (b.ticket) {
+      identity = readTicket(b.ticket);
+      if (!identity) return res.status(401).json({ error: 'Identity ticket invalid or expired — scan your National ID again.' });
+    } else if (!String(b.egovUniqid ?? '').startsWith('MOCK-')) {
+      return res.status(422).json({ error: 'Registration requires an eVerify identity ticket.' });
+    }
+
+    const egovUniqid = identity?.uniqid ?? b.egovUniqid ?? null;
+    const firstName = identity?.firstName ?? b.firstName;
+    const lastName = identity?.lastName ?? b.lastName;
+    if (!firstName || !lastName) return res.status(422).json({ error: 'Verified identity is incomplete.' });
+
+    if (egovUniqid) {
+      const existing = await prisma.user.findUnique({ where: { egovUniqid } });
       if (existing)
         return res.json({ user: publicUser(existing), token: issueToken(existing), existed: true });
     }
     const user = await prisma.user.create({
       data: {
-        egovUniqid: b.egovUniqid || null,
+        egovUniqid,
         role,
-        firstName: b.firstName,
-        lastName: b.lastName,
-        middleName: b.middleName || null,
-        suffix: b.suffix || null,
-        birthDate: b.birthDate || null,
-        mobile: b.mobile || null,
-        bloodType: b.bloodType || null,
+        firstName,
+        lastName,
+        middleName: identity?.middleName ?? b.middleName ?? null,
+        suffix: identity?.suffix ?? b.suffix ?? null,
+        birthDate: identity?.birthDate ?? b.birthDate ?? null,
+        mobile: b.mobile ?? identity?.mobile ?? null,
+        bloodType: b.bloodType ?? identity?.bloodType ?? null,
         allergies: JSON.stringify(b.allergies || []),
         conditions: JSON.stringify(b.conditions || []),
         emergencyName: b.emergencyName || null,
         emergencyPhone: b.emergencyPhone || null,
         verified: role === 'PATIENT',
+        everified: Boolean(identity),
       },
     });
     res.json({ user: publicUser(user), token: issueToken(user) });
@@ -190,14 +237,29 @@ api.get(
 
 // ---------- eVerify ----------
 
+/**
+ * Edit-unlock verification: the scanned National ID must match the Health ID
+ * on record at >= 70% (weighted name + birth date similarity).
+ */
 api.post(
   '/everify/qr-check',
   requireAuth,
   wrap(async (req, res) => {
     if (!req.body.value) return res.status(422).json({ error: 'value required' });
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
     const data = await everifyQrCheck(req.body.value);
-    await prisma.user.update({ where: { id: req.auth.id }, data: { everified: true } }).catch(() => {});
-    res.json({ verified: true, data });
+    const identity = normalizeIdentity(data);
+    if (!identity) return res.status(422).json({ error: 'eVerify returned no usable identity.' });
+    const score = matchScore(me, identity);
+    if (score < 70) {
+      return res.status(403).json({
+        error: `This National ID matches your Health ID only ${score}% — at least 70% is required to edit your information.`,
+        score,
+      });
+    }
+    await prisma.user.update({ where: { id: me.id }, data: { everified: true } });
+    res.json({ verified: true, score });
   }),
 );
 

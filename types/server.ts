@@ -36,6 +36,19 @@ export interface EgovProfile {
   nationality?: string;
 }
 
+/** Server-normalized identity resolved from eVerify (National ID QR). */
+export interface VerifiedIdentity {
+  uniqid: string;
+  firstName: string;
+  middleName?: string | null;
+  lastName: string;
+  suffix?: string | null;
+  birthDate?: string | null;
+  mobile?: string | null;
+  bloodType?: string | null;
+  gender?: string | null;
+}
+
 /** Session persisted on-device after registration/login. */
 export interface AgapaiSession {
   token: string;
