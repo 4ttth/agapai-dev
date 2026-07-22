@@ -35,6 +35,23 @@ const publicUser = (u) => ({
   createdAt: u.createdAt,
 });
 
+const PRO_ROLES = ['DOCTOR', 'PHARMACIST'];
+
+/**
+ * The same National ID may hold a patient Health ID *and* a professional
+ * account, so every identity lookup is scoped to the app that is asking:
+ * the patient app resolves the PATIENT row, AgapAI Pro the DOCTOR/PHARMACIST
+ * row. Without this, whichever account was created first shadowed the other.
+ */
+const scopeOf = (req) => (String(req.body?.scope ?? '').toUpperCase() === 'PRO' ? 'PRO' : 'PATIENT');
+
+const findScoped = (egovUniqid, scope) =>
+  egovUniqid
+    ? prisma.user.findFirst({
+        where: { egovUniqid, role: scope === 'PRO' ? { in: PRO_ROLES } : 'PATIENT' },
+      })
+    : null;
+
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((err) => {
     console.error(`[api] ${req.method} ${req.path}:`, err.message, err.body ?? '');
@@ -72,9 +89,8 @@ api.get(
 
 // ---------- Auth ----------
 
-async function ssoRespond(res, egovProfile) {
-  const uniqid = egovProfile.uniqid;
-  const user = uniqid ? await prisma.user.findUnique({ where: { egovUniqid: uniqid } }) : null;
+async function ssoRespond(res, egovProfile, scope) {
+  const user = await findScoped(egovProfile.uniqid, scope);
   if (user) {
     return res.json({ registered: true, user: publicUser(user), token: issueToken(user), egovProfile });
   }
@@ -87,7 +103,7 @@ api.post(
     const { exchange_code } = req.body;
     if (!exchange_code) return res.status(422).json({ error: 'exchange_code required' });
     const egovProfile = await ssoExchange(exchange_code);
-    await ssoRespond(res, egovProfile);
+    await ssoRespond(res, egovProfile, scopeOf(req));
   }),
 );
 
@@ -106,7 +122,7 @@ api.post(
       birth_date: '1990-01-01',
       nationality: 'Filipino',
     };
-    await ssoRespond(res, egovProfile);
+    await ssoRespond(res, egovProfile, scopeOf(req));
   }),
 );
 
@@ -132,7 +148,7 @@ api.post(
     console.log('[everify-login] fields received:', Object.keys(data ?? {}).join(','));
     const identity = normalizeIdentity(data);
     if (!identity) return res.status(422).json({ error: 'eVerify returned no usable identity for this QR.' });
-    const user = await prisma.user.findUnique({ where: { egovUniqid: identity.uniqid } });
+    const user = await findScoped(identity.uniqid, scopeOf(req));
     if (user) {
       return res.json({ registered: true, user: publicUser(user), token: issueToken(user), identity });
     }
@@ -161,8 +177,10 @@ api.post(
     const lastName = identity?.lastName ?? b.lastName;
     if (!firstName || !lastName) return res.status(422).json({ error: 'Verified identity is incomplete.' });
 
+    // Scoped to the role being registered: a pro account must not be handed
+    // back to someone creating their Health ID (or vice versa).
     if (egovUniqid) {
-      const existing = await prisma.user.findUnique({ where: { egovUniqid } });
+      const existing = await findScoped(egovUniqid, role === 'PATIENT' ? 'PATIENT' : 'PRO');
       if (existing)
         return res.json({ user: publicUser(existing), token: issueToken(existing), existed: true });
     }

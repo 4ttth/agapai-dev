@@ -63,8 +63,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (qrValue: string) => {
+    // scope PRO: resolve this National ID's professional account, not the
+    // Health ID the same person may hold in the patient app.
     const result = await api<EverifyLoginResult>('/auth/everify-login', {
-      body: { value: qrValue },
+      body: { value: qrValue, scope: 'PRO' },
       timeoutMs: 30000,
     });
     if (result.registered && result.user && result.token) {

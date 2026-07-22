@@ -26,14 +26,21 @@ export interface EverifyLoginResult {
 }
 
 export const serverApi = {
-  /** Real eGov verification: resolve a National ID QR through eVerify. */
+  /**
+   * Real eGov verification: resolve a National ID QR through eVerify.
+   * scope PATIENT so a doctor/pharmacist account on the same National ID
+   * doesn't shadow this person's Health ID.
+   */
   everifyLogin(value: string) {
-    return api<EverifyLoginResult>('/auth/everify-login', { body: { value }, timeoutMs: 30000 });
+    return api<EverifyLoginResult>('/auth/everify-login', {
+      body: { value, scope: 'PATIENT' },
+      timeoutMs: 30000,
+    });
   },
 
   /** Live eGov SSO: exchange code captured from the SSO redirect. */
   ssoExchange(exchange_code: string) {
-    return api<SsoResult>('/auth/sso/exchange', { body: { exchange_code } });
+    return api<SsoResult>('/auth/sso/exchange', { body: { exchange_code, scope: 'PATIENT' } });
   },
 
   register(input: {

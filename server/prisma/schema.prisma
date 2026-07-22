@@ -21,7 +21,7 @@ enum MedSource {
 
 model User {
   id             String   @id @default(cuid())
-  egovUniqid     String?  @unique
+  egovUniqid     String?
   role           Role     @default(PATIENT)
   firstName      String
   lastName       String
@@ -42,6 +42,11 @@ model User {
   consultationsAsPatient Consultation[] @relation("patient")
   consultationsAsDoctor  Consultation[] @relation("doctor")
   medications            Medication[]
+
+  // One National ID resolves to one eVerify uniqid, but the same person may be
+  // both a patient (Health ID) and a professional. Uniqueness is per-role so a
+  // doctor/pharmacist account no longer blocks that person's own Health ID.
+  @@unique([egovUniqid, role])
 }
 
 model Consultation {
