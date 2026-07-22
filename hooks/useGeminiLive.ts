@@ -127,7 +127,10 @@ export function useGeminiLive() {
         const ctx = new AudioContext({ sampleRate: OUTPUT_RATE });
         const queue = ctx.createBufferQueueSource();
         queue.connect(ctx.destination);
-        queue.start();
+        // Pass an explicit (when, offset) of 0. The library's start() defaults
+        // offset to -1 as a "no offset" sentinel, but its own guard then throws
+        // "offset must be a finite non-negative number: -1", so we must start at 0.
+        queue.start(0, 0);
         ctxRef.current = ctx;
         queueRef.current = queue;
 

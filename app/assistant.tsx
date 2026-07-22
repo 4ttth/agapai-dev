@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,6 +28,8 @@ interface Msg {
   source?: string;
 }
 
+type Mode = 'voice' | 'text';
+
 const SUGGESTIONS = [
   'I feel dizzy and nauseous',
   'What are my medications today?',
@@ -35,15 +38,20 @@ const SUGGESTIONS = [
 ];
 
 /**
- * AI Health Assistant. Symptom questions → AgapAI's home-remedy engine;
- * government/general questions → live eGov AI; questions about your own
- * medications/consultations are answered on-device only.
+ * AI Health Assistant. Voice-first: the main screen is a live voice
+ * conversation, and patients who can't (or would rather not) speak can switch
+ * to text chat at any time.
+ *
+ * Symptom questions → AgapAI's home-remedy engine; government/general questions
+ * → live eGov AI; questions about your own medications/consultations are
+ * answered on-device only.
  */
 export default function AssistantScreen() {
   const { session } = useAuth();
   const { medications, todaysDoses } = useMedications();
-  const { speaking, toggle, speak, stop } = useSpeech();
+  const { speaking, speak, stop } = useSpeech();
   const live = useGeminiLive();
+  const [mode, setMode] = useState<Mode>('voice');
   const [messages, setMessages] = useState<Msg[]>([
     {
       id: 'hello',
@@ -53,13 +61,35 @@ export default function AssistantScreen() {
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(true);
+  const [voiceReplies, setVoiceReplies] = useState(true);
   /** Text pulled out of a document the patient photographed, sent as context. */
   const [docText, setDocText] = useState<string | null>(null);
   const [docName, setDocName] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const consultRef = useRef<ConsultationRow[] | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  const firstName = session?.user?.firstName;
+  const greeting = useMemo(
+    () => `Kumusta${firstName ? `, ${firstName}` : ''}! Tap the mic and tell me how you're feeling.`,
+    [firstName],
+  );
+
+  /** Gentle pulse behind the mic orb while a call is live. */
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (live.state === 'live') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 0, duration: 1200, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    pulse.setValue(0);
+  }, [live.state, pulse]);
 
   /** Photograph or pick a lab result / prescription → eGov AI extracts the text. */
   const attachDocument = useCallback(async () => {
@@ -164,7 +194,7 @@ export default function AssistantScreen() {
           ...m,
           { id: `a${Date.now()}`, who: 'ai', text: reply.reply, source: reply.source },
         ]);
-        if (voiceOn) speak(reply.reply.replace(/[•⚠]/g, ''));
+        if (voiceReplies) speak(reply.reply.replace(/[•⚠]/g, ''));
       } catch (err) {
         setMessages((m) => [
           ...m,
@@ -182,8 +212,63 @@ export default function AssistantScreen() {
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
       }
     },
-    [input, busy, localAnswer, session, voiceOn, speak, docText],
+    [input, busy, localAnswer, session, voiceReplies, speak, docText],
   );
+
+  /** Tapping the mic orb starts a call (or ends it if one is running). */
+  const toggleCall = useCallback(() => {
+    if (live.state === 'live' || live.state === 'connecting') {
+      live.stop();
+    } else {
+      stop(); // silence any text-to-speech before opening the mic
+      void live.start(docText ?? undefined);
+    }
+  }, [live, stop, docText]);
+
+  const goToText = useCallback(() => {
+    if (live.state === 'live' || live.state === 'connecting') live.stop();
+    setMode('text');
+  }, [live]);
+
+  const goToVoice = useCallback(() => {
+    stop(); // silence text-to-speech when returning to the voice screen
+    setMode('voice');
+  }, [stop]);
+
+  const isConnecting = live.state === 'connecting';
+  const isLive = live.state === 'live';
+  const isError = live.state === 'error';
+
+  const orbIcon = isConnecting
+    ? 'ellipsis-horizontal'
+    : isError
+      ? 'refresh'
+      : isLive && live.speaking
+        ? 'volume-high'
+        : 'mic';
+
+  const statusTitle = isConnecting
+    ? 'Connecting…'
+    : isError
+      ? "Couldn't start voice"
+      : isLive
+        ? live.speaking
+          ? 'Assistant is speaking'
+          : 'Listening…'
+        : 'Tap to talk';
+
+  const statusHint = isConnecting
+    ? 'Getting the voice assistant ready.'
+    : isError
+      ? (live.error ?? 'Tap the mic to try again.')
+      : isLive
+        ? live.speaking
+          ? 'Just talk to interrupt anytime.'
+          : 'Speak naturally — I’m listening.'
+        : 'I’ll listen and reply out loud. No typing needed.';
+
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] });
 
   return (
     <KeyboardAvoidingView
@@ -191,171 +276,383 @@ export default function AssistantScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={styles.scroll}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-        showsVerticalScrollIndicator={false}
-      >
-        {messages.map((m) => (
-          <View
-            key={m.id}
-            style={[styles.bubble, m.who === 'user' ? styles.userBubble : styles.aiBubble]}
-          >
-            <AppText variant="body" color={m.who === 'user' ? 'inverse' : 'primary'}>
-              {m.text}
-            </AppText>
-            {m.source ? (
-              <AppText variant="caption" color={m.who === 'user' ? 'inverse' : 'muted'} style={styles.source}>
-                {m.source === 'gemini'
-                  ? 'via Gemini AI'
-                  : m.source === 'egov-ai'
-                    ? 'via eGov AI'
-                    : m.source === 'on-device'
-                      ? 'answered on your phone only'
-                      : 'AgapAI health guide'}
-              </AppText>
-            ) : null}
-          </View>
-        ))}
-        {busy ? (
-          <View style={[styles.bubble, styles.aiBubble]}>
-            <AppText variant="body" color="secondary">
-              Thinking…
-            </AppText>
-          </View>
-        ) : null}
-
-        <View style={styles.suggestions}>
-          {SUGGESTIONS.map((s) => (
-            <Pressable key={s} onPress={() => void send(s)} style={styles.suggestion}>
-              <AppText variant="caption" color="accent">
-                {s}
-              </AppText>
-            </Pressable>
-          ))}
-        </View>
-      </ScrollView>
-
-      {live.state !== 'idle' ? (
-        <View style={[styles.liveBar, live.state === 'error' && styles.liveBarError]}>
+      <View style={styles.header}>
+        <AppText variant="heading">Health Assistant</AppText>
+        <Pressable
+          onPress={mode === 'voice' ? goToText : goToVoice}
+          style={styles.modeSwitch}
+          accessibilityRole="button"
+          accessibilityLabel={mode === 'voice' ? 'Switch to text chat' : 'Switch to voice'}
+        >
           <Ionicons
-            name={
-              live.state === 'live' ? (live.speaking ? 'volume-high' : 'mic') : live.state === 'error' ? 'warning' : 'ellipsis-horizontal'
-            }
+            name={mode === 'voice' ? 'chatbubble-ellipses-outline' : 'mic-outline'}
             size={18}
-            color={colors.onPrimary}
+            color={colors.primary}
           />
-          <AppText variant="caption" color="inverse" style={styles.flex}>
-            {live.state === 'connecting'
-              ? 'Connecting to the voice assistant…'
-              : live.state === 'error'
-                ? (live.error ?? 'Voice assistant unavailable.')
-                : live.speaking
-                  ? 'Assistant is speaking — you can interrupt anytime'
-                  : 'Listening… just speak naturally'}
+          <AppText variant="label" color="accent">
+            {mode === 'voice' ? 'Type' : 'Talk'}
           </AppText>
-          <Pressable onPress={live.stop} accessibilityRole="button" accessibilityLabel="End voice call">
-            <Ionicons name="close-circle" size={22} color={colors.onPrimary} />
-          </Pressable>
-        </View>
-      ) : null}
-      {docText ? (
-        <View style={styles.docChip}>
-          <Ionicons name="document-text" size={18} color={colors.success} />
-          <AppText variant="caption" color="secondary" style={styles.flex} numberOfLines={1}>
-            Reading “{docName}” — ask me about it
-          </AppText>
-          <Pressable
-            onPress={() => {
-              setDocText(null);
-              setDocName(null);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Remove the attached document"
-          >
-            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-          </Pressable>
-        </View>
-      ) : null}
-      <View style={styles.inputRow}>
-        <Pressable
-          onPress={() => {
-            if (speaking) stop();
-            setVoiceOn((v) => !v);
-          }}
-          style={[styles.voiceBtn, voiceOn && styles.voiceOn]}
-          accessibilityRole="button"
-          accessibilityLabel={voiceOn ? 'Voice replies on' : 'Voice replies off'}
-          accessibilityHint="Toggles whether replies are spoken aloud"
-        >
-          <Ionicons
-            name={voiceOn ? 'volume-high' : 'volume-mute'}
-            size={22}
-            color={voiceOn ? colors.onPrimary : colors.textSecondary}
-          />
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            if (live.state === 'live' || live.state === 'connecting') {
-              live.stop();
-            } else {
-              stop(); // silence text-to-speech before opening the mic
-              void live.start(docText ?? undefined);
-            }
-          }}
-          style={[styles.attachBtn, live.state === 'live' && styles.talkActive]}
-          accessibilityRole="button"
-          accessibilityLabel={live.state === 'live' ? 'End voice conversation' : 'Talk to the assistant'}
-          accessibilityHint="Starts a live voice conversation with the AgapAI assistant"
-        >
-          <Ionicons
-            name={live.state === 'live' ? 'stop-circle' : 'call'}
-            size={22}
-            color={live.state === 'live' ? colors.onPrimary : colors.textSecondary}
-          />
-        </Pressable>
-        <Pressable
-          onPress={() => void attachDocument()}
-          disabled={reading}
-          style={styles.attachBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Attach a document for the assistant to read"
-          accessibilityHint="Choose a photo of a lab result or prescription"
-        >
-          <Ionicons
-            name={reading ? 'hourglass-outline' : 'document-attach-outline'}
-            size={22}
-            color={docText ? colors.success : colors.textSecondary}
-          />
-        </Pressable>
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder="How are you feeling?"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          multiline
-          accessibilityLabel="Message the assistant"
-          onSubmitEditing={() => void send()}
-        />
-        <Pressable
-          onPress={() => void send()}
-          disabled={busy || !input.trim()}
-          style={[styles.sendBtn, (busy || !input.trim()) && styles.sendDisabled]}
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-        >
-          <Ionicons name="arrow-up" size={22} color={colors.onPrimary} />
         </Pressable>
       </View>
+
+      {mode === 'voice' ? (
+        <ScrollView
+          contentContainerStyle={styles.voiceScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppText variant="body" color="secondary" center style={styles.greeting}>
+            {greeting}
+          </AppText>
+
+          <View style={styles.orbWrap}>
+            {isLive ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.pulseRing,
+                  { transform: [{ scale: ringScale }], opacity: ringOpacity },
+                ]}
+              />
+            ) : null}
+            <Pressable
+              onPress={toggleCall}
+              disabled={isConnecting}
+              style={[
+                styles.orb,
+                isLive && styles.orbLive,
+                isLive && live.speaking && styles.orbSpeaking,
+                isError && styles.orbError,
+                isConnecting && styles.orbConnecting,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isLive ? 'End voice conversation' : 'Start talking to the assistant'
+              }
+              accessibilityHint="Starts a live voice conversation with the AgapAI assistant"
+            >
+              <Ionicons name={orbIcon as any} size={68} color={colors.onPrimary} />
+            </Pressable>
+          </View>
+
+          <AppText variant="title" center style={styles.statusTitle}>
+            {statusTitle}
+          </AppText>
+          <AppText variant="body" color="secondary" center style={styles.statusHint}>
+            {statusHint}
+          </AppText>
+
+          {isLive ? (
+            <Pressable
+              onPress={live.stop}
+              style={styles.endBtn}
+              accessibilityRole="button"
+              accessibilityLabel="End voice conversation"
+            >
+              <Ionicons name="stop-circle" size={20} color={colors.onDanger} />
+              <AppText variant="label" color="inverse">
+                End conversation
+              </AppText>
+            </Pressable>
+          ) : null}
+
+          {docText ? (
+            <View style={styles.docChip}>
+              <Ionicons name="document-text" size={18} color={colors.success} />
+              <AppText variant="caption" color="secondary" style={styles.flex} numberOfLines={1}>
+                Reading “{docName}” — ask me about it
+              </AppText>
+              <Pressable
+                onPress={() => {
+                  setDocText(null);
+                  setDocName(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Remove the attached document"
+              >
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => void attachDocument()}
+              disabled={reading}
+              style={styles.secondaryAction}
+              accessibilityRole="button"
+              accessibilityLabel="Attach a document for the assistant to read"
+              accessibilityHint="Choose a photo of a lab result or prescription"
+            >
+              <Ionicons
+                name={reading ? 'hourglass-outline' : 'document-attach-outline'}
+                size={20}
+                color={colors.primary}
+              />
+              <AppText variant="label" color="accent">
+                {reading ? 'Reading document…' : 'Attach a document'}
+              </AppText>
+            </Pressable>
+          )}
+
+          <Pressable
+            onPress={goToText}
+            style={styles.typeInstead}
+            accessibilityRole="button"
+            accessibilityLabel="Type a message instead"
+            accessibilityHint="Opens a text chat if you would rather not speak"
+          >
+            <Ionicons name="keypad-outline" size={20} color={colors.textSecondary} />
+            <AppText variant="label" color="secondary">
+              Can’t talk right now? Type instead
+            </AppText>
+          </Pressable>
+        </ScrollView>
+      ) : (
+        <>
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.scroll}
+            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+            showsVerticalScrollIndicator={false}
+          >
+            <Pressable
+              onPress={goToVoice}
+              style={styles.talkBanner}
+              accessibilityRole="button"
+              accessibilityLabel="Switch to voice conversation"
+            >
+              <Ionicons name="mic" size={18} color={colors.onPrimary} />
+              <AppText variant="label" color="inverse" style={styles.flex}>
+                Prefer to talk? Start a voice conversation
+              </AppText>
+              <Ionicons name="chevron-forward" size={18} color={colors.onPrimary} />
+            </Pressable>
+
+            {messages.map((m) => (
+              <View
+                key={m.id}
+                style={[styles.bubble, m.who === 'user' ? styles.userBubble : styles.aiBubble]}
+              >
+                <AppText variant="body" color={m.who === 'user' ? 'inverse' : 'primary'}>
+                  {m.text}
+                </AppText>
+                {m.source ? (
+                  <AppText
+                    variant="caption"
+                    color={m.who === 'user' ? 'inverse' : 'muted'}
+                    style={styles.source}
+                  >
+                    {m.source === 'gemini'
+                      ? 'via Gemini AI'
+                      : m.source === 'egov-ai'
+                        ? 'via eGov AI'
+                        : m.source === 'on-device'
+                          ? 'answered on your phone only'
+                          : 'AgapAI health guide'}
+                  </AppText>
+                ) : null}
+              </View>
+            ))}
+            {busy ? (
+              <View style={[styles.bubble, styles.aiBubble]}>
+                <AppText variant="body" color="secondary">
+                  Thinking…
+                </AppText>
+              </View>
+            ) : null}
+
+            <View style={styles.suggestions}>
+              {SUGGESTIONS.map((s) => (
+                <Pressable key={s} onPress={() => void send(s)} style={styles.suggestion}>
+                  <AppText variant="caption" color="accent">
+                    {s}
+                  </AppText>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+
+          {docText ? (
+            <View style={styles.docChip}>
+              <Ionicons name="document-text" size={18} color={colors.success} />
+              <AppText variant="caption" color="secondary" style={styles.flex} numberOfLines={1}>
+                Reading “{docName}” — ask me about it
+              </AppText>
+              <Pressable
+                onPress={() => {
+                  setDocText(null);
+                  setDocName(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Remove the attached document"
+              >
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          ) : null}
+
+          <View style={styles.inputRow}>
+            <Pressable
+              onPress={() => {
+                if (speaking) stop();
+                setVoiceReplies((v) => !v);
+              }}
+              style={[styles.roundBtn, voiceReplies && styles.voiceOn]}
+              accessibilityRole="button"
+              accessibilityLabel={voiceReplies ? 'Spoken replies on' : 'Spoken replies off'}
+              accessibilityHint="Toggles whether replies are read aloud"
+            >
+              <Ionicons
+                name={voiceReplies ? 'volume-high' : 'volume-mute'}
+                size={22}
+                color={voiceReplies ? colors.onPrimary : colors.textSecondary}
+              />
+            </Pressable>
+            <Pressable
+              onPress={() => void attachDocument()}
+              disabled={reading}
+              style={styles.attachBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Attach a document for the assistant to read"
+              accessibilityHint="Choose a photo of a lab result or prescription"
+            >
+              <Ionicons
+                name={reading ? 'hourglass-outline' : 'document-attach-outline'}
+                size={22}
+                color={docText ? colors.success : colors.textSecondary}
+              />
+            </Pressable>
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              placeholder="How are you feeling?"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              multiline
+              accessibilityLabel="Message the assistant"
+              onSubmitEditing={() => void send()}
+            />
+            <Pressable
+              onPress={() => void send()}
+              disabled={busy || !input.trim()}
+              style={[styles.sendBtn, (busy || !input.trim()) && styles.sendDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+            >
+              <Ionicons name="arrow-up" size={22} color={colors.onPrimary} />
+            </Pressable>
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
 
+const ORB_SIZE = 168;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  modeSwitch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: palette.blue100,
+    backgroundColor: palette.blue50,
+  },
+
+  // --- Voice-first hero ---
+  voiceScroll: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: layout.screenPadding,
+    paddingVertical: spacing.xl,
+    gap: spacing.lg,
+  },
+  greeting: { maxWidth: 320 },
+  orbWrap: {
+    width: ORB_SIZE + 60,
+    height: ORB_SIZE + 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: spacing.md,
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    borderRadius: ORB_SIZE / 2,
+    backgroundColor: colors.accent,
+  },
+  orb: {
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    borderRadius: ORB_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    shadowColor: colors.primaryDark,
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  orbLive: { backgroundColor: colors.accent },
+  orbSpeaking: { backgroundColor: colors.primary },
+  orbError: { backgroundColor: colors.danger },
+  orbConnecting: { opacity: 0.7 },
+  statusTitle: { marginTop: spacing.xs },
+  statusHint: { maxWidth: 300 },
+  endBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radii.pill,
+    backgroundColor: colors.danger,
+  },
+  secondaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: palette.blue100,
+    backgroundColor: palette.blue50,
+  },
+  typeInstead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+
+  // --- Text chat ---
   scroll: { padding: layout.screenPadding, gap: spacing.md, paddingBottom: spacing.xl },
+  talkBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: colors.primary,
+    marginBottom: spacing.xs,
+  },
   bubble: { maxWidth: '86%', borderRadius: radii.lg, padding: spacing.lg, gap: spacing.xs },
   userBubble: { alignSelf: 'flex-end', backgroundColor: colors.primary, borderBottomRightRadius: radii.sm },
   aiBubble: {
@@ -366,16 +663,6 @@ const styles = StyleSheet.create({
   source: { marginTop: spacing.xs, opacity: 0.8 },
   flex: { flex: 1 },
   attachBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  talkActive: { backgroundColor: colors.danger, borderRadius: radii.pill },
-  liveBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: layout.screenPadding,
-    paddingVertical: spacing.md,
-    backgroundColor: colors.primary,
-  },
-  liveBarError: { backgroundColor: colors.danger },
   docChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -383,6 +670,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingVertical: spacing.sm,
     backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+    marginHorizontal: layout.screenPadding,
+    alignSelf: 'stretch',
   },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
   suggestion: {
@@ -404,7 +694,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-  voiceBtn: {
+  roundBtn: {
     width: 48,
     height: 48,
     borderRadius: radii.pill,
