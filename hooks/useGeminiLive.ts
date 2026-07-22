@@ -164,7 +164,15 @@ export function useGeminiLive() {
             const data = part?.inlineData?.data;
             if (!data) continue;
             try {
-              const buffer = await decodePCMInBase64(data, OUTPUT_RATE, 1);
+              // Gemini declares the rate on the part (audio/pcm;rate=24000);
+              // trust it rather than assuming, so a format change can't
+              // silently play everything back at the wrong pitch.
+              const declared = Number(/rate=(\d+)/.exec(part?.inlineData?.mimeType ?? '')?.[1]);
+              const buffer = await decodePCMInBase64(
+                data,
+                Number.isFinite(declared) && declared > 0 ? declared : OUTPUT_RATE,
+                1,
+              );
               queueRef.current?.enqueueBuffer(buffer);
               setSpeaking(true);
             } catch {
@@ -205,10 +213,14 @@ export function useGeminiLive() {
         if (!readyRef.current || ws.readyState !== WebSocket.OPEN) return;
         try {
           const pcm = floatToPcm16(buffer.getChannelData(0));
+          // The recorder may hand back a different rate than requested
+          // depending on the hardware, so declare what we actually captured —
+          // hardcoding 16000 would make Gemini mishear on such devices.
+          const rate = Math.round(buffer.sampleRate) || INPUT_RATE;
           ws.send(
             JSON.stringify({
               realtimeInput: {
-                audio: { data: toBase64(pcm), mimeType: `audio/pcm;rate=${INPUT_RATE}` },
+                audio: { data: toBase64(pcm), mimeType: `audio/pcm;rate=${rate}` },
               },
             }),
           );
