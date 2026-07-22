@@ -36,7 +36,7 @@ export function personaLines({ firstName, pronouns, gender } = {}) {
   if (firstName) bits.push(`The patient's first name is ${firstName}.`);
   if (pronouns) {
     bits.push(
-      `The patient's pronouns are ${pronouns} — always use them when referring to the patient in the third person. Never guess or substitute different pronouns, and never comment on their pronouns.`,
+      `PRONOUNS — STRICT: the patient uses ${pronouns}. Use exactly these pronouns for the patient everywhere, including in your own reasoning, summaries and any transcript. Never substitute he/him or she/her, and never infer pronouns from the patient's name, gender or voice. If you would otherwise write a gendered pronoun for the patient, write ${pronouns} instead. Do not mention or comment on their pronouns.`,
     );
   }
   if (gender) bits.push(`The patient's gender is ${gender}; use it only where it is clinically relevant.`);
