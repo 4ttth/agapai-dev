@@ -7,10 +7,13 @@
  */
 
 const key = () => process.env.GEMINI_API_KEY || '';
-// gemini-flash-latest tracks Google's current Flash model and stays callable
-// on newly-issued API keys; pinned 2.5/2.0 ids now 404 ("no longer available
-// to new users") or 429 for fresh keys.
-const model = () => process.env.GEMINI_MODEL || 'gemini-flash-latest';
+// The "-latest" aliases stay callable on newly-issued API keys; pinned 2.5/2.0
+// ids now 404 ("no longer available to new users") or 429 for fresh keys.
+// flash-lite over flash deliberately: flash-latest is a *thinking* model that
+// spends ~600 thought tokens and ~47s per reply (blowing the request timeout
+// and truncating the answer), while flash-lite answers in ~1.7s with no
+// thinking and comparable output for this assistant's short-guidance use case.
+const model = () => process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 
 export const geminiEnabled = () => Boolean(key());
 
@@ -69,9 +72,11 @@ export async function askGemini(prompt, firstName, opts = {}) {
           ],
         },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 600 },
+        // Headroom so a thinking model's thought tokens can't truncate the
+        // answer (that shows up as a reply cut off mid-reasoning).
+        generationConfig: { temperature: 0.6, maxOutputTokens: 2048 },
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(45000),
     },
   );
   const body = await res.json().catch(() => ({}));
