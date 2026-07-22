@@ -58,6 +58,32 @@ export function attachLiveRelay(server) {
   return wss;
 }
 
+/**
+ * Drop the model's private reasoning before it reaches the phone.
+ *
+ * The session is audio-only, so any `text` part coming back is thinking, not
+ * the spoken reply — and that reasoning has been observed misgendering a
+ * they/them patient regardless of how firmly the system prompt states their
+ * pronouns. Surfacing it would show the patient a misgendered transcript, so
+ * text and explicitly-flagged thought parts are stripped; audio passes through
+ * untouched. Non-JSON or unexpected frames are forwarded verbatim.
+ */
+function stripThoughts(data) {
+  const raw = typeof data === 'string' ? data : data.toString('utf8');
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return data;
+  }
+  const parts = msg?.serverContent?.modelTurn?.parts;
+  if (!Array.isArray(parts)) return data;
+  const kept = parts.filter((p) => p?.thought !== true && typeof p?.text !== 'string');
+  if (kept.length === parts.length) return data;
+  msg.serverContent.modelTurn.parts = kept;
+  return JSON.stringify(msg);
+}
+
 async function bridge(client, auth, documentText) {
   const user = await prisma.user.findUnique({ where: { id: auth.id } }).catch(() => null);
   const persona = personaLines({
@@ -99,7 +125,7 @@ async function bridge(client, auth, documentText) {
     if (client.readyState !== client.OPEN) return;
     // Upstream frames may be Blob (native WebSocket) or string.
     const data = typeof ev.data === 'string' ? ev.data : Buffer.from(await ev.data.arrayBuffer());
-    client.send(data);
+    client.send(stripThoughts(data));
   };
 
   upstream.onerror = () => closeBoth(1011, 'upstream error');
