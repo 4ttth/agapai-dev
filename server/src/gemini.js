@@ -24,7 +24,34 @@ Rules:
 - End with one short line: this is general guidance, not a diagnosis.
 - If asked about non-health topics (government services, PhilHealth, etc.), answer briefly and helpfully.`;
 
-export async function askGemini(prompt, firstName) {
+/**
+ * Address the patient the way they told us to at registration. Pronouns are
+ * free-form, so they are passed through verbatim rather than mapped to a set.
+ */
+export function personaLines({ firstName, pronouns, gender } = {}) {
+  const bits = [];
+  if (firstName) bits.push(`The patient's first name is ${firstName}.`);
+  if (pronouns) {
+    bits.push(
+      `The patient's pronouns are ${pronouns} — always use them when referring to the patient in the third person. Never guess or substitute different pronouns, and never comment on their pronouns.`,
+    );
+  }
+  if (gender) bits.push(`The patient's gender is ${gender}; use it only where it is clinically relevant.`);
+  return bits.length ? `\n${bits.join('\n')}` : '';
+}
+
+/** Extracted document text the patient uploaded, for the model to interpret. */
+export function documentLines(documentText) {
+  const t = String(documentText ?? '').trim();
+  if (!t) return '';
+  return (
+    `\n\nThe patient uploaded a document. Text extracted from it by eGov AI is between the markers.` +
+    ` Explain it in plain language and relate it to their question; if the text is unclear or looks incomplete, say so rather than guessing.\n` +
+    `--- BEGIN DOCUMENT ---\n${t.slice(0, 12000)}\n--- END DOCUMENT ---`
+  );
+}
+
+export async function askGemini(prompt, firstName, opts = {}) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent?key=${key()}`,
     {
@@ -32,7 +59,14 @@ export async function askGemini(prompt, firstName) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT + (firstName ? `\nThe patient's first name is ${firstName}.` : '') }],
+          parts: [
+            {
+              text:
+                SYSTEM_PROMPT +
+                personaLines({ firstName, pronouns: opts.pronouns, gender: opts.gender }) +
+                documentLines(opts.documentText),
+            },
+          ],
         },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.6, maxOutputTokens: 600 },

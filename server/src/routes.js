@@ -1,7 +1,16 @@
 import { Router } from 'express';
 
 import { prisma } from './db.js';
-import { aiAssistant, aiCredits, everifyQrCheck, sendSms, serviceHealth, ssoExchange } from './egov.js';
+import {
+  aiAssistant,
+  aiCredits,
+  everifyQrCheck,
+  extractDocument,
+  extractedText,
+  sendSms,
+  serviceHealth,
+  ssoExchange,
+} from './egov.js';
 import { askGemini, geminiEnabled } from './gemini.js';
 import {
   buildHealthReply,
@@ -23,6 +32,8 @@ const publicUser = (u) => ({
   middleName: u.middleName,
   suffix: u.suffix,
   birthDate: u.birthDate,
+  gender: u.gender,
+  pronouns: u.pronouns,
   mobile: u.mobile,
   bloodType: u.bloodType,
   allergies: JSON.parse(u.allergies || '[]'),
@@ -193,6 +204,9 @@ api.post(
         middleName: identity?.middleName ?? b.middleName ?? null,
         suffix: identity?.suffix ?? b.suffix ?? null,
         birthDate: identity?.birthDate ?? b.birthDate ?? null,
+        // Self-declared at registration: eVerify carries a sex marker, never pronouns.
+        gender: b.gender ?? identity?.gender ?? null,
+        pronouns: b.pronouns ?? null,
         mobile: b.mobile ?? identity?.mobile ?? null,
         bloodType: b.bloodType ?? identity?.bloodType ?? null,
         allergies: JSON.stringify(b.allergies || []),
@@ -229,6 +243,8 @@ api.patch(
       'middleName',
       'suffix',
       'birthDate',
+      'gender',
+      'pronouns',
       'mobile',
       'bloodType',
       'emergencyName',
@@ -287,13 +303,20 @@ api.post(
   '/ai/assistant',
   requireAuth,
   wrap(async (req, res) => {
-    const { prompt, firstName } = req.body;
+    const { prompt, firstName, documentText } = req.body;
     if (!prompt) return res.status(422).json({ error: 'prompt required' });
+
+    // Persona comes from the record, not the client, so pronouns can't be spoofed.
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } }).catch(() => null);
 
     // 1) Primary engine: Gemini (handles health questions properly).
     if (geminiEnabled()) {
       try {
-        const reply = await askGemini(prompt, firstName);
+        const reply = await askGemini(prompt, firstName ?? me?.firstName, {
+          pronouns: me?.pronouns,
+          gender: me?.gender,
+          documentText,
+        });
         return res.json({ reply, source: 'gemini' });
       } catch (err) {
         console.error('[ai] Gemini failed, falling back:', err.message);
@@ -318,6 +341,32 @@ api.post(
         return res.json({ reply: genericHealthReply(firstName), source: 'agapai-health' });
       }
       throw err;
+    }
+  }),
+);
+
+/**
+ * Document text extraction via eGov AI. The patient photographs a lab result,
+ * prescription or clinic form on their own phone; we OCR it upstream and hand
+ * the text back so it can be fed to the assistant for interpretation.
+ */
+api.post(
+  '/documents/extract',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { base64, filename, mimeType } = req.body;
+    if (!base64) return res.status(422).json({ error: 'base64 (document image) required' });
+    try {
+      const body = await extractDocument({ base64, filename, mimeType });
+      const text = extractedText(body);
+      if (!text.trim())
+        return res.status(422).json({ error: 'No readable text found in that document.', raw: body });
+      return res.json({ text, source: 'egov-document-extractor' });
+    } catch (err) {
+      console.error('[documents] extraction failed:', err.status, err.message);
+      return res
+        .status(502)
+        .json({ error: 'eGov could not read that document. Try a clearer, well-lit photo.' });
     }
   }),
 );

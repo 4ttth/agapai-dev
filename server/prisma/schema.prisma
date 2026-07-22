@@ -28,6 +28,9 @@ model User {
   middleName     String?
   suffix         String?
   birthDate      String?
+  gender         String?
+  /** Free-form, e.g. "he/him", "she/her", "they/them". Drives how the AI addresses them. */
+  pronouns       String?
   mobile         String?
   bloodType      String?
   allergies      String   @default("[]")

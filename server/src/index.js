@@ -7,6 +7,7 @@ import express from 'express';
 
 import { startCron } from './cron.js';
 import { prisma } from './db.js';
+import { attachLiveRelay } from './live.js';
 import { api } from './routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,8 @@ app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public
 app.get('/', (_req, res) => res.json({ app: 'AgapAI server', ok: true }));
 
 const port = Number(process.env.PORT || 4000);
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`AgapAI server listening on :${port}`);
   startCron();
 });
+attachLiveRelay(server);

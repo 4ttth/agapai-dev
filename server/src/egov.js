@@ -123,6 +123,51 @@ export async function aiAssistant(prompt) {
   return body;
 }
 
+/**
+ * eGov AI Document Extractor — OCR/structured extraction from a photo or PDF
+ * the patient took on their own phone. Returns whatever shape the upstream
+ * gives; extractedText() below flattens it to plain text for the assistant.
+ */
+export async function extractDocument({ base64, filename = 'document.jpg', mimeType = 'image/jpeg' }) {
+  const token = await egovAiAuth();
+  const form = new FormData();
+  form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: mimeType }), filename);
+  const { status, body } = await jsonFetch(
+    `${env('EGOVAI_BASE')}/api/v1/egov/integration/document_extractor/generate`,
+    { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form },
+    90000,
+  );
+  if (status !== 200) throw Object.assign(new Error('eGov document extraction failed'), { status, body });
+  return body;
+}
+
+/** Flatten the extractor's response to plain text, whatever key it used. */
+export function extractedText(body) {
+  if (body == null) return '';
+  if (typeof body === 'string') return body;
+  const direct = body.text ?? body.data ?? body.result ?? body.content ?? body.extracted_text;
+  if (typeof direct === 'string') return direct;
+  const seen = new Set();
+  const parts = [];
+  const walk = (v, depth = 0) => {
+    if (v == null || depth > 6 || parts.length > 400) return;
+    if (typeof v === 'string') {
+      if (v.trim()) parts.push(v.trim());
+      return;
+    }
+    if (typeof v === 'number' || typeof v === 'boolean') return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, depth + 1));
+    for (const [k, val] of Object.entries(v)) {
+      if (typeof val === 'string' && val.trim()) parts.push(`${k}: ${val.trim()}`);
+      else walk(val, depth + 1);
+    }
+  };
+  walk(direct ?? body);
+  return parts.join('\n');
+}
+
 export async function aiCredits() {
   const token = await egovAiAuth();
   const { body } = await jsonFetch(`${env('EGOVAI_BASE')}/api/v1/egov/integration/credits`, {
