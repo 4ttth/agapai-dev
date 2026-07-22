@@ -30,6 +30,12 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "AgapAI Pro lets you upload a photo of your National ID QR code when your camera is unavailable."
+        }
+      ],
+      [
         "expo-audio",
         {
           "microphonePermission": "AgapAI Pro records consultation voice notes."

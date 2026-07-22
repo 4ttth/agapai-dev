@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useSession } from '@/lib/SessionContext';
@@ -16,6 +17,8 @@ export default function ScanLoginScreen() {
   const handled = useRef(false);
   const [state, setState] = useState<'scan' | 'checking' | 'error'>('scan');
   const [message, setMessage] = useState('');
+  const [decoding, setDecoding] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const onScanned = async (value: string) => {
     if (handled.current) return;
@@ -30,6 +33,39 @@ export default function ScanLoginScreen() {
     }
   };
 
+  /** Camera unavailable (denied, broken, absent) — decode the QR from a photo. */
+  const pickFromLibrary = useCallback(async () => {
+    setUploadError(null);
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+      });
+      const uri = picked.assets?.[0]?.uri;
+      if (picked.canceled || !uri) return;
+      setDecoding(true);
+      const found = await scanFromURLAsync(uri, ['qr']);
+      const data = found?.[0]?.data;
+      if (!data) {
+        setUploadError('No QR code found in that photo. Make sure the QR is sharp and fills the frame.');
+        return;
+      }
+      await onScanned(data);
+    } catch {
+      setUploadError('Could not read that image. Please try another photo.');
+    } finally {
+      setDecoding(false);
+    }
+  }, []);
+
+  const uploadBtn = (
+    <Btn
+      label={decoding ? 'Reading photo…' : 'Upload a photo instead'}
+      kind="ghost"
+      onPress={() => void pickFromLibrary()}
+    />
+  );
+
   if (!permission) return null;
 
   if (!permission.granted) {
@@ -39,9 +75,11 @@ export default function ScanLoginScreen() {
           Camera access needed
         </T>
         <T size={15} color={colors.textSecondary} center>
-          Allow the camera to scan the QR on your National ID.
+          Allow the camera to scan the QR on your National ID — or upload a photo of it instead.
         </T>
         <Btn label="Allow camera" onPress={() => void requestPermission()} />
+        {uploadBtn}
+        {uploadError ? <Banner text={uploadError} tone="danger" /> : null}
       </View>
     );
   }
@@ -88,6 +126,8 @@ export default function ScanLoginScreen() {
         <T size={15} color={colors.textSecondary} center>
           Point the camera at the QR on the back of your Philippine National ID.
         </T>
+        {uploadBtn}
+        {uploadError ? <Banner text={uploadError} tone="danger" /> : null}
         <View style={styles.privacyRow}>
           <Ionicons name="lock-closed" size={13} color={colors.textMuted} />
           <T size={12} color={colors.textMuted}>
