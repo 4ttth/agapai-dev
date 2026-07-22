@@ -141,12 +141,26 @@ export async function extractDocument({ base64, filename = 'document.jpg', mimeT
   return body;
 }
 
+/** The extractor formats its answer as light HTML; the models want plain text. */
+const stripHtml = (s) =>
+  String(s)
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
 /** Flatten the extractor's response to plain text, whatever key it used. */
 export function extractedText(body) {
   if (body == null) return '';
-  if (typeof body === 'string') return body;
+  if (typeof body === 'string') return stripHtml(body);
   const direct = body.text ?? body.data ?? body.result ?? body.content ?? body.extracted_text;
-  if (typeof direct === 'string') return direct;
+  if (typeof direct === 'string') return stripHtml(direct);
   const seen = new Set();
   const parts = [];
   const walk = (v, depth = 0) => {
@@ -165,7 +179,7 @@ export function extractedText(body) {
     }
   };
   walk(direct ?? body);
-  return parts.join('\n');
+  return stripHtml(parts.join('\n'));
 }
 
 export async function aiCredits() {
