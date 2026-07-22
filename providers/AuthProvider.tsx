@@ -13,6 +13,8 @@ export type AuthStatus = 'initializing' | 'signedOut' | 'registering' | 'signedI
 
 interface RegisterInput {
   bloodType?: string;
+  gender?: string;
+  pronouns?: string;
   allergies?: string[];
   conditions?: string[];
   emergencyName?: string;

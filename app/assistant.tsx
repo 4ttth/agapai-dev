@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -51,8 +52,57 @@ export default function AssistantScreen() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
+  /** Text pulled out of a document the patient photographed, sent as context. */
+  const [docText, setDocText] = useState<string | null>(null);
+  const [docName, setDocName] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
   const consultRef = useRef<ConsultationRow[] | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  /** Photograph or pick a lab result / prescription → eGov AI extracts the text. */
+  const attachDocument = useCallback(async () => {
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        base64: true,
+      });
+      const asset = picked.assets?.[0];
+      if (picked.canceled || !asset?.base64) return;
+      setReading(true);
+      const { text } = await serverApi.extractDocument(
+        asset.base64,
+        asset.fileName ?? 'document.jpg',
+        asset.mimeType ?? 'image/jpeg',
+      );
+      setDocText(text);
+      setDocName(asset.fileName ?? 'Document');
+      setMessages((m) => [
+        ...m,
+        {
+          id: `d${Date.now()}`,
+          who: 'ai',
+          text: `I've read your document. Ask me anything about it — for example "ano ibig sabihin nito?"`,
+          source: 'egov-document-extractor',
+        },
+      ]);
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: `de${Date.now()}`,
+          who: 'ai',
+          text:
+            err instanceof Error && err.message
+              ? err.message
+              : 'I could not read that document. Try a clearer, well-lit photo.',
+        },
+      ]);
+    } finally {
+      setReading(false);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+    }
+  }, []);
 
   useEffect(() => {
     serverApi
@@ -107,7 +157,7 @@ export default function AssistantScreen() {
         const local = localAnswer(text);
         const reply = local
           ? { reply: local, source: 'on-device' }
-          : await serverApi.askAssistant(text, session?.user.firstName);
+          : await serverApi.askAssistant(text, session?.user.firstName, docText ?? undefined);
         setMessages((m) => [
           ...m,
           { id: `a${Date.now()}`, who: 'ai', text: reply.reply, source: reply.source },
@@ -130,7 +180,7 @@ export default function AssistantScreen() {
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
       }
     },
-    [input, busy, localAnswer, session, voiceOn, speak],
+    [input, busy, localAnswer, session, voiceOn, speak, docText],
   );
 
   return (
@@ -185,6 +235,24 @@ export default function AssistantScreen() {
         </View>
       </ScrollView>
 
+      {docText ? (
+        <View style={styles.docChip}>
+          <Ionicons name="document-text" size={18} color={colors.success} />
+          <AppText variant="caption" color="secondary" style={styles.flex} numberOfLines={1}>
+            Reading “{docName}” — ask me about it
+          </AppText>
+          <Pressable
+            onPress={() => {
+              setDocText(null);
+              setDocName(null);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Remove the attached document"
+          >
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      ) : null}
       <View style={styles.inputRow}>
         <Pressable
           onPress={() => {
@@ -200,6 +268,20 @@ export default function AssistantScreen() {
             name={voiceOn ? 'volume-high' : 'volume-mute'}
             size={22}
             color={voiceOn ? colors.onPrimary : colors.textSecondary}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => void attachDocument()}
+          disabled={reading}
+          style={styles.attachBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Attach a document for the assistant to read"
+          accessibilityHint="Choose a photo of a lab result or prescription"
+        >
+          <Ionicons
+            name={reading ? 'hourglass-outline' : 'document-attach-outline'}
+            size={22}
+            color={docText ? colors.success : colors.textSecondary}
           />
         </Pressable>
         <TextInput
@@ -237,6 +319,16 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: radii.sm,
   },
   source: { marginTop: spacing.xs, opacity: 0.8 },
+  flex: { flex: 1 },
+  attachBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  docChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
   suggestion: {
     borderWidth: 1.5,

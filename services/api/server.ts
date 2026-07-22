@@ -49,6 +49,8 @@ export const serverApi = {
     role: 'PATIENT' | 'DOCTOR' | 'PHARMACIST';
     mobile?: string;
     bloodType?: string;
+    gender?: string;
+    pronouns?: string;
     allergies?: string[];
     conditions?: string[];
     emergencyName?: string;
@@ -76,10 +78,22 @@ export const serverApi = {
     });
   },
 
-  askAssistant(prompt: string, firstName?: string) {
+  askAssistant(prompt: string, firstName?: string, documentText?: string) {
     return api<{ reply: string; source: string }>('/ai/assistant', {
-      body: { prompt, firstName },
+      body: { prompt, firstName, documentText },
       timeoutMs: 60000,
+    });
+  },
+
+  /**
+   * Run a photo of a document (lab result, prescription, clinic form) through
+   * eGov AI's extractor. The returned text can be passed back to askAssistant
+   * as documentText so the AI can interpret it.
+   */
+  extractDocument(base64: string, filename = 'document.jpg', mimeType = 'image/jpeg') {
+    return api<{ text: string; source: string }>('/documents/extract', {
+      body: { base64, filename, mimeType },
+      timeoutMs: 90000,
     });
   },
 

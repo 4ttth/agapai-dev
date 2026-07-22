@@ -12,6 +12,9 @@ export interface ServerUser {
   middleName?: string | null;
   suffix?: string | null;
   birthDate?: string | null;
+  gender?: string | null;
+  /** Free-form, e.g. "he/him" — drives how the assistant refers to them. */
+  pronouns?: string | null;
   mobile?: string | null;
   bloodType?: string | null;
   allergies: string[];

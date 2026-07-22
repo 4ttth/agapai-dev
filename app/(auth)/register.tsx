@@ -15,6 +15,8 @@ import { colors, radii, spacing } from '@/theme';
 import type { BloodType } from '@/types';
 
 const BLOOD_TYPES: BloodType[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'];
+const GENDERS = ['Male', 'Female', 'Prefer not to say'];
+const PRONOUN_OPTIONS = ['he/him', 'she/her', 'they/them'];
 const ALLERGY_OPTIONS = ['Penicillin', 'Aspirin', 'Sulfa drugs', 'Seafood', 'Peanuts', 'Eggs', 'Dust', 'Pollen'];
 const CONDITION_OPTIONS = [
   'Hypertension',
@@ -70,6 +72,10 @@ export default function RegisterScreen() {
   const identity = pending?.identity;
 
   const [bloodType, setBloodType] = useState<BloodType | null>(null);
+  const [gender, setGender] = useState<string | null>(null);
+  const [genderOther, setGenderOther] = useState('');
+  const [pronouns, setPronouns] = useState<string | null>(null);
+  const [pronounsOther, setPronounsOther] = useState('');
   const [allergies, setAllergies] = useState<string[]>([]);
   const [allergyOther, setAllergyOther] = useState('');
   const [conditions, setConditions] = useState<string[]>([]);
@@ -93,19 +99,31 @@ export default function RegisterScreen() {
       const m = identity.mobile.replace(/^0/, '+63').replace(/^63/, '+63');
       if (/^\+639\d{9}$/.test(m)) setMobile(m);
     }
+    // eVerify carries a sex marker; it seeds gender but never pronouns, which
+    // are always the patient's own choice.
+    if (identity?.gender) {
+      const g = GENDERS.find((x) => x.toLowerCase() === identity.gender?.toLowerCase());
+      if (g) setGender(g);
+      else setGenderOther(identity.gender);
+    }
   }, [identity]);
 
   const phoneOk = /^\+639\d{9}$/.test(emergencyPhone.trim());
   const mobileOk = /^\+639\d{9}$/.test(mobile.trim());
+  // A typed "other" value always wins over the chip selection.
+  const genderValue = genderOther.trim() || gender || '';
+  const pronounsValue = pronounsOther.trim() || pronouns || '';
   const errors = useMemo(
     () => ({
       bloodType: bloodType ? undefined : 'Please choose your blood type',
+      gender: genderValue ? undefined : 'Please choose your gender',
+      pronouns: pronounsValue ? undefined : 'Please choose the pronouns we should use for you',
       mobile: mobileOk ? undefined : 'Use the format +639XXXXXXXXX',
       emergencyName: emergencyName.trim() ? undefined : 'Emergency contact name is required',
       emergencyPhone: phoneOk ? undefined : 'Use the format +639XXXXXXXXX',
       agreed: agreed ? undefined : 'Please agree to continue',
     }),
-    [bloodType, mobileOk, emergencyName, phoneOk, agreed],
+    [bloodType, genderValue, pronounsValue, mobileOk, emergencyName, phoneOk, agreed],
   );
   const valid = Object.values(errors).every((e) => !e);
 
@@ -124,6 +142,8 @@ export default function RegisterScreen() {
     try {
       await register({
         bloodType: bloodType ?? undefined,
+        gender: genderValue,
+        pronouns: pronounsValue,
         allergies: [...allergies, ...splitOthers(allergyOther)],
         conditions: [...conditions, ...splitOthers(conditionOther)],
         mobile: mobile.trim(),
@@ -190,6 +210,65 @@ export default function RegisterScreen() {
           {touched && errors.bloodType ? (
             <AppText variant="caption" color="danger">
               {errors.bloodType}
+            </AppText>
+          ) : null}
+        </View>
+
+        <View style={styles.group}>
+          <AppText variant="label">Gender *</AppText>
+          <View style={styles.chips}>
+            {GENDERS.map((g) => (
+              <Chip
+                key={g}
+                label={g}
+                selected={!genderOther.trim() && gender === g}
+                onPress={() => {
+                  setGender(g);
+                  setGenderOther('');
+                }}
+              />
+            ))}
+          </View>
+          <TextField
+            label="Or type your own (gender)"
+            placeholder="Leave blank to use the choice above"
+            value={genderOther}
+            onChangeText={setGenderOther}
+          />
+          {touched && errors.gender ? (
+            <AppText variant="caption" color="danger">
+              {errors.gender}
+            </AppText>
+          ) : null}
+        </View>
+
+        <View style={styles.group}>
+          <AppText variant="label">Your pronouns *</AppText>
+          <AppText variant="caption" color="secondary">
+            The AgapAI assistant will use these when it talks about you.
+          </AppText>
+          <View style={styles.chips}>
+            {PRONOUN_OPTIONS.map((p) => (
+              <Chip
+                key={p}
+                label={p}
+                selected={!pronounsOther.trim() && pronouns === p}
+                onPress={() => {
+                  setPronouns(p);
+                  setPronounsOther('');
+                }}
+              />
+            ))}
+          </View>
+          <TextField
+            label="Or type your own (pronouns)"
+            placeholder="e.g. ze/zir — leave blank to use the choice above"
+            value={pronounsOther}
+            onChangeText={setPronounsOther}
+          />
+          {touched && errors.pronouns ? (
+            <AppText variant="caption" color="danger">
+              {errors.pronouns}
             </AppText>
           ) : null}
         </View>
