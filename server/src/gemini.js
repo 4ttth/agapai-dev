@@ -7,7 +7,10 @@
  */
 
 const key = () => process.env.GEMINI_API_KEY || '';
-const model = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// gemini-flash-latest tracks Google's current Flash model and stays callable
+// on newly-issued API keys; pinned 2.5/2.0 ids now 404 ("no longer available
+// to new users") or 429 for fresh keys.
+const model = () => process.env.GEMINI_MODEL || 'gemini-flash-latest';
 
 export const geminiEnabled = () => Boolean(key());
 
