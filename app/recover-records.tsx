@@ -3,13 +3,14 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { FaceLivenessModal } from '@/components/FaceLivenessModal';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useAuth } from '@/hooks/useAuth';
 import { serverApi } from '@/services/api/server';
 import { colors, radii, spacing } from '@/theme';
-import { getDeviceId, runFaceLiveness } from '@/utils/liveness';
+import { getDeviceId } from '@/utils/device';
 
 type Phase = 'intro' | 'running' | 'done' | 'failed';
 
@@ -23,19 +24,16 @@ export default function RecoverRecordsScreen() {
   const { recoverPatientKey } = useAuth();
   const [phase, setPhase] = useState<Phase>('intro');
   const [message, setMessage] = useState<string | null>(null);
+  const [livenessOpen, setLivenessOpen] = useState(false);
 
-  const run = async () => {
+  const onLivenessResult = async (token: string | null) => {
+    setLivenessOpen(false);
+    if (!token) return setPhase('intro'); // cancelled
     setPhase('running');
     setMessage(null);
-    const live = await runFaceLiveness('key-recovery');
-    if (!live.ok) {
-      if (live.reason === 'cancelled') return setPhase('intro');
-      setMessage(live.message ?? 'Face Liveness could not start.');
-      return setPhase('failed');
-    }
     try {
       const deviceId = await getDeviceId();
-      const { patientKey } = await serverApi.recoverKey(live.token, deviceId);
+      const { patientKey } = await serverApi.recoverKey(token, deviceId);
       await recoverPatientKey(patientKey);
       setPhase('done');
     } catch (err) {
@@ -84,14 +82,20 @@ export default function RecoverRecordsScreen() {
             </AppText>
           ) : null}
           <Button
-            label={phase === 'running' ? 'Waiting for Face Liveness…' : 'Start Face Liveness test'}
+            label={phase === 'running' ? 'Recovering…' : 'Start Face Liveness test'}
             loading={phase === 'running'}
             icon={<Ionicons name="happy" size={20} color={colors.onPrimary} />}
-            onPress={() => void run()}
+            onPress={() => setLivenessOpen(true)}
           />
           <Button label="Not now" variant="ghost" onPress={() => router.back()} />
         </View>
       )}
+
+      <FaceLivenessModal
+        visible={livenessOpen}
+        purpose="key-recovery"
+        onResult={(token) => void onLivenessResult(token)}
+      />
     </View>
   );
 }
