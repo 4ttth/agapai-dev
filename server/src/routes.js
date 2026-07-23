@@ -857,20 +857,25 @@ api.get(
   }),
 );
 
-/** Delete a registered professional. Patients are protected (their PII/records
- *  cascade-delete, so admins can't remove a patient account from here). */
+/**
+ * Delete any account (professional or patient). Dependent rows that don't
+ * cascade are removed first; PatientPII and KeyEscrow cascade automatically.
+ * Deleting a patient therefore also erases their consultations, medications,
+ * SMS log, escrowed key, and encrypted PII record.
+ */
 api.delete(
   '/admin/users/:id',
   requireAdmin,
   wrap(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!PRO_ROLES.includes(user.role))
-      return res.status(403).json({ error: 'Only doctor/pharmacist accounts can be deleted here.' });
-    // A professional never has patient consultations, but be safe.
-    await prisma.medication.deleteMany({ where: { patientId: user.id } }).catch(() => {});
-    await prisma.user.delete({ where: { id: user.id } });
-    res.json({ ok: true, deleted: user.id });
+    const id = user.id;
+    // Consultations reference this person as patient or doctor (no cascade).
+    await prisma.consultation.deleteMany({ where: { OR: [{ patientId: id }, { doctorId: id }] } }).catch(() => {});
+    await prisma.medication.deleteMany({ where: { patientId: id } }).catch(() => {});
+    await prisma.smsLog.deleteMany({ where: { patientId: id } }).catch(() => {});
+    await prisma.user.delete({ where: { id } });
+    res.json({ ok: true, deleted: id, role: user.role });
   }),
 );
 
