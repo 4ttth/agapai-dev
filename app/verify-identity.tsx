@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { serverApi } from '@/services/api/server';
 import { colors, radii, spacing } from '@/theme';
+import { runFaceLiveness } from '@/utils/liveness';
 
 type Phase = 'intro' | 'scanning' | 'verifying' | 'done' | 'failed';
 
@@ -41,6 +42,26 @@ export default function VerifyIdentityScreen() {
     [updateUser],
   );
 
+  const onFaceLiveness = useCallback(async () => {
+    const live = await runFaceLiveness('edit-unlock');
+    if (!live.ok) {
+      if (live.reason === 'cancelled') return;
+      setMessage(live.message ?? 'Face Liveness could not start.');
+      return setPhase('failed');
+    }
+    setPhase('verifying');
+    try {
+      const result = await serverApi.livenessUnlock(live.token);
+      setScore(result.score);
+      const { user } = await serverApi.me();
+      await updateUser(user);
+      setPhase('done');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Face Liveness verification failed.');
+      setPhase('failed');
+    }
+  }, [updateUser]);
+
   return (
     <View style={styles.root}>
       {phase === 'intro' ? (
@@ -59,6 +80,15 @@ export default function VerifyIdentityScreen() {
             label="Scan my National ID QR"
             icon={<Ionicons name="scan" size={22} color={colors.onPrimary} />}
             onPress={() => setPhase('scanning')}
+          />
+          <AppText variant="caption" color="muted" center>
+            On a new phone? Use Face Liveness instead — no National ID needed.
+          </AppText>
+          <Button
+            label="Verify with Face Liveness"
+            variant="secondary"
+            icon={<Ionicons name="happy" size={22} color={colors.primary} />}
+            onPress={() => void onFaceLiveness()}
           />
           <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
         </View>

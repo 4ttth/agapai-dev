@@ -12,7 +12,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Screen } from '@/components/ui/Screen';
-import { useMedications } from '@/features/pill-tracker';
 import { useAuth } from '@/hooks/useAuth';
 import { serverApi } from '@/services/api/server';
 import { colors, radii, spacing } from '@/theme';
@@ -24,13 +23,11 @@ export default function ConsultationDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { session } = useAuth();
-  const { addMedication } = useMedications();
 
   const [row, setRow] = useState<ConsultationRow | null>(null);
   const [record, setRecord] = useState<DecryptedConsultation | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error' | 'locked'>('loading');
   const [playing, setPlaying] = useState(false);
-  const [added, setAdded] = useState(false);
   const soundRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
@@ -88,35 +85,15 @@ export default function ConsultationDetailScreen() {
     }
   }, [record, playing]);
 
-  const addAllToMeds = useCallback(async () => {
-    if (!record) return;
-    for (const p of record.prescriptions) {
-      await addMedication({
-        name: p.name,
-        dosage: p.dosage || '1',
-        unit: '',
-        form: 'tablet',
-        appearance: { color: 'Prescribed', colorHex: '#0B4F9E', shape: 'round' },
-        schedule: {
-          frequency: 'custom',
-          times: p.times.length > 0 ? p.times : ['08:00'],
-          startDate: new Date().toISOString().slice(0, 10),
-        },
-        instructions: p.instructions,
-        prescribingDoctor: `Dr. ${row?.doctor?.firstName ?? ''} ${row?.doctor?.lastName ?? ''}`.trim(),
-      }).catch(() => {});
-    }
-    setAdded(true);
-  }, [record, row, addMedication]);
-
   if (state === 'loading') return <LoadingState message="Decrypting your record…" />;
   if (state === 'error' || !row)
     return <ErrorState message="We could not load this consultation." onRetry={() => router.back()} />;
   if (state === 'locked')
     return (
       <ErrorState
-        message="This record is encrypted with a key this phone doesn't have. It can be recovered by verifying your National ID via eVerify."
-        onRetry={() => router.push('/verify-identity')}
+        message="This record is encrypted with a key this phone doesn't have — it looks like you signed in on a new phone. Pass a quick Face Liveness test to release your records to this device (your old phone will then stop working)."
+        retryLabel="Recover with Face Liveness"
+        onRetry={() => router.push('/recover-records')}
       />
     );
 
@@ -186,14 +163,13 @@ export default function ConsultationDetailScreen() {
                 </View>
               </View>
             ))}
-            <Button
-              label={added ? 'Added to My Medicines ✓' : 'Add all to My Medicines'}
-              variant={added ? 'success' : 'primary'}
-              disabled={added}
-              icon={<Ionicons name="add-circle" size={20} color={colors.onPrimary} />}
-              onPress={() => void addAllToMeds()}
-              accessibilityHint="Creates reminders for each prescribed medicine"
-            />
+            <View style={styles.autoAddedRow}>
+              <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+              <AppText variant="caption" color="success" style={styles.flex}>
+                These medicines were added to My Medicines automatically and now power your reminders.
+                They&apos;re managed by your doctor, so they can&apos;t be edited here.
+              </AppText>
+            </View>
           </View>
         ) : (
           <AppText variant="body" color="secondary">
@@ -231,4 +207,12 @@ const styles = StyleSheet.create({
   },
   rxImage: { width: '100%', height: 260, marginTop: spacing.lg, borderRadius: radii.md },
   flex: { flex: 1 },
+  autoAddedRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.successLight,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
 });

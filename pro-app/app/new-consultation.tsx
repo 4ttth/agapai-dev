@@ -132,6 +132,9 @@ export default function NewConsultationScreen() {
           ...enc,
           hasVoice: !!voiceB64,
           hasRxImage: !!rxImageB64,
+          // Sent in the clear (alongside the encrypted record) so the medicines
+          // land in the patient's app automatically and drive SMS reminders.
+          prescriptions,
         },
         timeoutMs: 60000,
       });
@@ -153,7 +156,7 @@ export default function NewConsultationScreen() {
         </T>
         <T size={15} color={colors.textSecondary} center>
           Only {payload.preview.fullName} can decrypt this record. It is now available in their
-          AgapAI app.
+          AgapAI app{rxRows.some((r) => r.name.trim()) ? ', and the prescribed medicines were added to their reminders automatically' : ''}.
         </T>
         <Btn label="Done" onPress={() => router.replace('/doctor')} />
       </View>

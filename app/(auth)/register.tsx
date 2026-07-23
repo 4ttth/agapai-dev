@@ -81,6 +81,7 @@ export default function RegisterScreen() {
   const [conditions, setConditions] = useState<string[]>([]);
   const [conditionOther, setConditionOther] = useState('');
   const [mobile, setMobile] = useState('+639');
+  const [mobile2, setMobile2] = useState('');
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('+639');
   const [agreed, setAgreed] = useState(false);
@@ -147,6 +148,7 @@ export default function RegisterScreen() {
         allergies: [...allergies, ...splitOthers(allergyOther)],
         conditions: [...conditions, ...splitOthers(conditionOther)],
         mobile: mobile.trim(),
+        mobile2: mobile2.trim() || undefined,
         emergencyName: emergencyName.trim(),
         emergencyPhone: emergencyPhone.trim(),
       });
@@ -297,8 +299,15 @@ export default function RegisterScreen() {
           keyboardType="phone-pad"
           value={mobile}
           onChangeText={setMobile}
-          hint="Used for SMS medication reminders (+639XXXXXXXXX)"
+          hint="From your National ID. Used for SMS medication reminders (+639XXXXXXXXX)"
           error={touched ? errors.mobile : undefined}
+        />
+        <TextField
+          label="Second mobile number (optional)"
+          keyboardType="phone-pad"
+          value={mobile2}
+          onChangeText={setMobile2}
+          hint="eMessage reminders are also sent here — e.g. a caregiver's number"
         />
         <TextField
           label="Emergency contact — full name"
