@@ -12,5 +12,5 @@
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
   ],
-  "exclude": ["node_modules", "pro-app", "server"]
+  "exclude": ["node_modules", "pro-app", "server", "admin-web"]
 }

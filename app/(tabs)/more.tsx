@@ -34,12 +34,6 @@ export default function MoreScreen() {
       route: user?.everified ? '/edit-profile' : '/verify-identity',
     },
     { icon: 'qr-code', label: 'My Health ID', sub: 'Show your QR to clinic staff', route: '/health-id' },
-    {
-      icon: 'shield-checkmark',
-      label: 'Verified professionals',
-      sub: 'PRC licenses of doctors & pharmacists',
-      route: '/directory',
-    },
     { icon: 'book', label: 'How to use AgapAI', route: '/guide' },
     { icon: 'lock-closed', label: 'Privacy Policy', route: '/privacy' },
     { icon: 'document-text', label: 'Terms & Conditions', route: '/terms' },

@@ -78,6 +78,50 @@ export async function everifyQrCheck(value) {
   return body.data ?? body;
 }
 
+/**
+ * eVerify "Verify Personal Information" — the real biometric identity check.
+ *
+ * Unlike a bare Face Liveness result (which only proves *a* live human), this
+ * compares the supplied demographics **and** the face captured in the liveness
+ * session against the PhilSys NIDAS database. A 200 means the live face belongs
+ * to the person named — so if a *different* live person runs the check against
+ * an account's name + birth date, NIDAS returns a non-match and this rejects.
+ *
+ * Returns `{ ok, matched, data }`. `ok` is only true when eVerify confirms the
+ * face and the demographics are the same identity.
+ */
+export async function everifyQuery({ firstName, lastName, middleName, suffix, birthDate, faceLivenessSessionId }) {
+  if (!firstName || !lastName || !birthDate || !faceLivenessSessionId) {
+    return { ok: false, matched: false, error: 'missing name, birth date, or liveness session' };
+  }
+  const token = await everifyAuth();
+  const payload = {
+    first_name: firstName,
+    last_name: lastName,
+    birth_date: birthDate,
+    face_liveness_session_id: faceLivenessSessionId,
+  };
+  if (middleName) payload.middle_name = middleName;
+  if (suffix) payload.suffix = suffix;
+
+  const { status, body } = await jsonFetch(
+    `${env('EVERIFY_BASE')}/api/query`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    },
+    20000,
+  );
+  const data = body?.data ?? body;
+  // 200 with a returned record is a confirmed demographic + biometric match.
+  const matched = status === 200 && !!(data?.full_name || data?.first_name || data?.reference);
+  if (!matched) {
+    return { ok: false, matched: false, status, data };
+  }
+  return { ok: true, matched: true, status, data };
+}
+
 // ---------- eMessage ----------
 
 export async function sendSms(number, message) {

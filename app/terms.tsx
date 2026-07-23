@@ -19,7 +19,7 @@ export default function TermsScreen() {
         },
         {
           heading: '4. Professionals',
-          body: 'Doctors and pharmacists are verified manually by administrators against the PRC registry. Their PRC license numbers are visible to all users for accountability.',
+          body: 'Doctors and pharmacists are verified manually by administrators against the PRC registry before they can use AgapAI Pro. The license number of the professional who handled your visit appears on that consultation or dispense record for accountability.',
         },
         {
           heading: '5. Acceptable use',

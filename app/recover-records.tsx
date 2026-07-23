@@ -15,8 +15,8 @@ import { getDeviceId } from '@/utils/device';
 type Phase = 'intro' | 'running' | 'done' | 'failed';
 
 /**
- * New-phone record recovery. Face Liveness is the master key: once the patient
- * proves they're a live person, the server releases the escrowed consultation
+ * New-phone record recovery. Face Liveness is the master key: once the patient's
+ * live face is matched to their registered National ID, the server releases the escrowed consultation
  * key to THIS phone and retires the old one.
  */
 export default function RecoverRecordsScreen() {
@@ -67,7 +67,8 @@ export default function RecoverRecordsScreen() {
           <Card style={styles.card}>
             <AppText variant="body" color="secondary">
               Your consultations are end-to-end encrypted. On a new phone, a quick Face Liveness
-              test acts as your master key — it releases your records to this device.
+              test acts as your master key — your live face is matched to your registered National
+              ID, then your records are released to this device.
             </AppText>
             <View style={styles.noteRow}>
               <Ionicons name="phone-portrait" size={16} color={colors.warning} />

@@ -6,6 +6,7 @@ import {
   aiCredits,
   createLivenessSession,
   everifyQrCheck,
+  everifyQuery,
   extractDocument,
   extractedText,
   getLivenessResult,
@@ -74,6 +75,69 @@ async function verifyLivenessToken(token, { purpose = 'generic', userId = null }
     })
     .catch(() => {});
   return result;
+}
+
+// Identity matching can be disabled (e.g. in a demo without eVerify creds) by
+// setting EVERIFY_IDENTITY_MATCH=off — but it defaults ON, because a plain
+// liveness check only proves *a* live person, not *which* person.
+const identityMatchEnabled = () => (process.env.EVERIFY_IDENTITY_MATCH || 'on').toLowerCase() !== 'off';
+
+/**
+ * Prove that the person in front of the camera is the account holder — not just
+ * that they are alive. First the Face Liveness anti-spoof gate, then eVerify's
+ * biometric "Verify Personal Information" match of that same live face against
+ * the account's National ID name + birth date. A different live person clears
+ * liveness but fails the identity match, which is the whole point of this check
+ * for unlocking edits and recovering encrypted records onto a new phone.
+ *
+ * Fails closed: if identity matching is enabled but eVerify can't confirm the
+ * match (mismatch, missing identity data, or upstream error), the check fails.
+ */
+async function verifyAccountHolder(token, user, purpose) {
+  const live = await verifyLivenessToken(token, { purpose, userId: user?.id ?? null });
+  if (!live.ok) return { ...live, ok: false, reason: 'liveness' };
+
+  if (!identityMatchEnabled()) return { ...live, matched: null };
+
+  if (!user?.firstName || !user?.lastName || !user?.birthDate) {
+    return {
+      ok: false,
+      score: live.score,
+      reason: 'identity',
+      error: 'This account has no verified National ID identity on file to match against.',
+    };
+  }
+
+  let match;
+  try {
+    match = await everifyQuery({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      middleName: user.middleName,
+      suffix: user.suffix,
+      birthDate: user.birthDate,
+      faceLivenessSessionId: token,
+    });
+  } catch (err) {
+    console.error('[identity] eVerify query failed:', err.status, err.message);
+    return {
+      ok: false,
+      score: live.score,
+      reason: 'identity',
+      error: 'Could not confirm your identity with eVerify. Please try again.',
+    };
+  }
+
+  if (!match.matched) {
+    console.warn(`[identity] face did not match account ${user.id} (${purpose})`);
+    return {
+      ok: false,
+      score: live.score,
+      reason: 'identity',
+      error: 'That face does not match the National ID on this account.',
+    };
+  }
+  return { ok: true, score: live.score, matched: true };
 }
 
 const PRO_ROLES = ['DOCTOR', 'PHARMACIST'];
@@ -304,6 +368,9 @@ api.patch(
   requireAuth,
   wrap(async (req, res) => {
     const b = req.body;
+    const current = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!current) return res.status(404).json({ error: 'Not found' });
+
     const data = {};
     for (const k of [
       'firstName',
@@ -320,6 +387,16 @@ api.patch(
       'emergencyPhone',
     ])
       if (b[k] !== undefined) data[k] = b[k];
+
+    // Identity fields come from the National ID via eVerify and are immutable
+    // once verified: the birth date can never be changed, and the mobile number
+    // is locked once eVerify has supplied one. This mirrors the locked fields in
+    // the app and stops a tampered client from editing them directly.
+    if (current.everified) {
+      delete data.birthDate;
+      if (current.mobile) delete data.mobile;
+    }
+
     if (b.allergies) data.allergies = JSON.stringify(b.allergies);
     if (b.conditions) data.conditions = JSON.stringify(b.conditions);
     const user = await prisma.user.update({ where: { id: req.auth.id }, data });
@@ -368,22 +445,28 @@ api.post(
 
 /**
  * Edit-unlock via Face Liveness — the alternative to eVerify when the patient
- * is on a new phone. A passing liveness check (SUCCEEDED >= 95) proves a live
- * person and unlocks editing personal information.
+ * is on a new phone. The live face must both pass the anti-spoof liveness gate
+ * AND match this account's National ID identity (name + birth date) through
+ * eVerify, so another live person can't unlock someone else's information.
  */
 api.post(
   '/identity/liveness-unlock',
   requireAuth,
   wrap(async (req, res) => {
     const { livenessToken } = req.body || {};
-    const live = await verifyLivenessToken(livenessToken, { purpose: 'edit-unlock', userId: req.auth.id });
-    if (!live.ok)
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    const check = await verifyAccountHolder(livenessToken, me, 'edit-unlock');
+    if (!check.ok)
       return res.status(403).json({
-        error: `Face Liveness check did not pass (${live.status ?? 'no result'}).`,
-        liveness: live,
+        error:
+          check.reason === 'identity'
+            ? check.error
+            : `Face Liveness check did not pass (${check.status ?? 'no result'}).`,
+        liveness: check,
       });
     await prisma.user.update({ where: { id: req.auth.id }, data: { everified: true, liveVerified: true } });
-    res.json({ verified: true, score: live.score });
+    res.json({ verified: true, score: check.score });
   }),
 );
 
@@ -453,11 +536,16 @@ api.post(
   requireAuth,
   wrap(async (req, res) => {
     const { livenessToken, deviceId } = req.body || {};
-    const live = await verifyLivenessToken(livenessToken, { purpose: 'key-recovery', userId: req.auth.id });
-    if (!live.ok)
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    const check = await verifyAccountHolder(livenessToken, me, 'key-recovery');
+    if (!check.ok)
       return res.status(403).json({
-        error: `Face Liveness check did not pass (${live.status ?? 'no result'}). Records stay locked.`,
-        liveness: live,
+        error:
+          check.reason === 'identity'
+            ? `${check.error} Records stay locked.`
+            : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`,
+        liveness: check,
       });
     const escrow = await prisma.keyEscrow.findUnique({ where: { userId: req.auth.id } });
     if (!escrow) return res.status(404).json({ error: 'No escrowed key for this account yet.' });
@@ -471,7 +559,7 @@ api.post(
       where: { id: req.auth.id },
       data: { activeDeviceId: deviceId || null, liveVerified: true },
     });
-    res.json({ patientKey, score: live.score });
+    res.json({ patientKey, score: check.score });
   }),
 );
 

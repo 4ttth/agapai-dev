@@ -98,7 +98,6 @@ function RootNavigator() {
       <Stack.Screen name="verify-identity" options={{ title: 'Verify your identity', presentation: 'modal' }} />
       <Stack.Screen name="recover-records" options={{ title: 'Recover records', presentation: 'modal' }} />
       <Stack.Screen name="edit-profile" options={{ title: 'Edit personal info' }} />
-      <Stack.Screen name="directory" options={{ title: 'Verified professionals' }} />
       <Stack.Screen name="guide" options={{ title: 'How to use AgapAI' }} />
       <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
       <Stack.Screen name="terms" options={{ title: 'Terms & Conditions' }} />

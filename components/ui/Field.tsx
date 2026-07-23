@@ -45,16 +45,30 @@ interface TextFieldProps extends Omit<TextInputProps, 'style'> {
 /** Text input paired with the Field wrapper and full a11y labelling. */
 export function TextField({ label, error, hint, required, ...inputProps }: TextFieldProps) {
   const id = useId();
+  const locked = inputProps.editable === false;
   return (
     <Field label={label} error={error} hint={hint} required={required}>
-      <TextInput
-        accessibilityLabel={label}
-        accessibilityHint={hint}
-        aria-labelledby={id}
-        placeholderTextColor={colors.textMuted}
-        style={[styles.input, error ? styles.inputError : null]}
-        {...inputProps}
-      />
+      <View>
+        <TextInput
+          accessibilityLabel={label}
+          accessibilityHint={hint}
+          aria-labelledby={id}
+          placeholderTextColor={colors.textMuted}
+          style={[
+            styles.input,
+            locked ? styles.inputLocked : null,
+            error ? styles.inputError : null,
+          ]}
+          {...inputProps}
+        />
+        {locked ? (
+          <View style={styles.lockBadge} pointerEvents="none">
+            <AppText variant="caption" color="muted">
+              🔒
+            </AppText>
+          </View>
+        ) : null}
+      </View>
     </Field>
   );
 }
@@ -73,5 +87,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   inputError: { borderColor: colors.danger },
+  inputLocked: {
+    backgroundColor: colors.surfaceMuted,
+    color: colors.textSecondary,
+    borderColor: colors.border,
+    paddingRight: spacing.xxl,
+  },
+  lockBadge: {
+    position: 'absolute',
+    right: spacing.lg,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
   error: { marginTop: spacing.xs },
 });
