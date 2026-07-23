@@ -16,6 +16,8 @@ export interface ServerUser {
   /** Free-form, e.g. "he/him" — drives how the assistant refers to them. */
   pronouns?: string | null;
   mobile?: string | null;
+  /** Optional secondary number; eMessage reminders go to both. */
+  mobile2?: string | null;
   bloodType?: string | null;
   allergies: string[];
   conditions: string[];
@@ -24,6 +26,8 @@ export interface ServerUser {
   prcLicense?: string | null;
   verified: boolean;
   everified: boolean;
+  liveVerified?: boolean;
+  activeDeviceId?: string | null;
   createdAt: string;
 }
 

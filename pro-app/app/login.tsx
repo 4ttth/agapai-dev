@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSession } from '@/lib/SessionContext';
+import { runFaceLiveness } from '@/lib/liveness';
 import { colors, radii, spacing } from '@/lib/theme';
 import { Banner, Btn, Card, T } from '@/lib/ui';
 import type { Role } from '@/lib/api';
@@ -20,11 +21,24 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [liveMsg, setLiveMsg] = useState<string | null>(null);
+
   const doRegister = async () => {
     setBusy(true);
     setError(null);
+    // eVerify has already confirmed the identity; Face Liveness now confirms a
+    // real, live person is present before the professional account is created.
+    setLiveMsg('Opening Face Liveness test…');
+    const live = await runFaceLiveness();
+    setLiveMsg(null);
+    if (!live.ok) {
+      if (live.reason !== 'cancelled')
+        setError(live.message ?? 'Face Liveness could not start. Please try again.');
+      setBusy(false);
+      return;
+    }
     try {
-      await registerPro(role);
+      await registerPro(role, live.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed.');
     } finally {
@@ -87,9 +101,11 @@ export default function LoginScreen() {
             </View>
           </View>
           <T size={14} color={colors.textSecondary}>
-            One-time registration: choose your profession. An administrator will verify your PRC
-            license before you can upload or dispense.
+            One-time registration: choose your profession, then pass a quick Face Liveness test to
+            confirm you&apos;re really you. An administrator will verify your PRC license before you
+            can upload or dispense.
           </T>
+          {liveMsg ? <Banner text={liveMsg} tone="warning" /> : null}
           <View style={styles.roleRow}>
             {(
               [
@@ -111,7 +127,7 @@ export default function LoginScreen() {
               </Pressable>
             ))}
           </View>
-          <Btn label="Register" onPress={() => void doRegister()} loading={busy} />
+          <Btn label="Continue to Face Liveness" onPress={() => void doRegister()} loading={busy} />
         </Card>
       )}
     </ScrollView>

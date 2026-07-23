@@ -48,6 +48,7 @@ export const serverApi = {
     ticket: string;
     role: 'PATIENT' | 'DOCTOR' | 'PHARMACIST';
     mobile?: string;
+    mobile2?: string;
     bloodType?: string;
     gender?: string;
     pronouns?: string;
@@ -74,6 +75,27 @@ export const serverApi = {
   everifyQrCheck(value: string) {
     return api<{ verified: boolean; score: number }>('/everify/qr-check', {
       body: { value },
+      timeoutMs: 30000,
+    });
+  },
+
+  /** Unlock editing on a new phone via Face Liveness (alternative to eVerify). */
+  livenessUnlock(livenessToken: string) {
+    return api<{ verified: boolean; score: number }>('/identity/liveness-unlock', {
+      body: { livenessToken },
+      timeoutMs: 30000,
+    });
+  },
+
+  /** Escrow the patient's consultation key so a future phone can recover it. */
+  escrowKey(patientKey: string, deviceId: string) {
+    return api<{ ok: boolean }>('/keys/escrow', { body: { patientKey, deviceId } });
+  },
+
+  /** Recover the escrowed key on a new phone after passing Face Liveness. */
+  recoverKey(livenessToken: string, deviceId: string) {
+    return api<{ patientKey: string; score: number }>('/keys/recover', {
+      body: { livenessToken, deviceId },
       timeoutMs: 30000,
     });
   },

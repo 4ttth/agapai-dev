@@ -143,7 +143,17 @@ export function useGeminiLive() {
         ws.onmessage = async (event: WebSocketMessageEvent) => {
           let msg: Record<string, any>;
           try {
-            msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+            // Frames are JSON text, but a binary frame (ArrayBuffer) can still
+            // arrive depending on the platform — decode it rather than dropping
+            // it, or setupComplete could be missed and the call stalls.
+            const raw =
+              typeof event.data === 'string'
+                ? event.data
+                : event.data instanceof ArrayBuffer
+                  ? new TextDecoder().decode(event.data)
+                  : '';
+            if (!raw) return;
+            msg = JSON.parse(raw);
           } catch {
             return;
           }

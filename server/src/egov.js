@@ -89,6 +89,44 @@ export async function sendSms(number, message) {
   return { ok: status === 200 || status === 201, status, body };
 }
 
+// ---------- Face Liveness ----------
+
+const FACE_BASE = () => env('FACE_LIVENESS_BASE') || 'https://hackathon-face-liveness.e.gov.ph';
+
+/**
+ * Create an eGov Face Liveness session. Returns { token, url }; the app opens
+ * `url` in a WebView so the user completes the on-device liveness capture.
+ * `action` is redirect | post | close (see the Face Liveness API docs).
+ */
+export async function createLivenessSession({ action = 'post', callbackUrl, delay = 3000 } = {}) {
+  const body = { action, delay };
+  if (action === 'redirect' && callbackUrl) body.callback_url = callbackUrl;
+  const { status, body: res } = await jsonFetch(`${FACE_BASE()}/v1/liveness/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': env('FACE_LIVENESS_API_KEY') },
+    body: JSON.stringify(body),
+  });
+  if ((status !== 200 && status !== 201) || !res.token || !res.url) {
+    throw Object.assign(new Error('Face Liveness session creation failed'), { status, body: res });
+  }
+  return { token: res.token, url: res.url };
+}
+
+/**
+ * Fetch the final result for a liveness session token. Per the spec a pass is
+ * status === "SUCCEEDED" AND confidence_score >= 95.0; anything less is treated
+ * as high-risk (possible spoof) and rejected.
+ */
+export async function getLivenessResult(token) {
+  const { status, body } = await jsonFetch(`${FACE_BASE()}/v1/liveness/result/${token}`, {
+    headers: { 'x-api-key': env('FACE_LIVENESS_API_KEY') },
+  });
+  if (status !== 200) throw Object.assign(new Error('Face Liveness result fetch failed'), { status, body });
+  const score = Number(body.confidence_score ?? 0);
+  const ok = body.status === 'SUCCEEDED' && score >= 95.0;
+  return { ok, status: body.status, score, referenceImageUrl: body.reference_image_url ?? null, raw: body };
+}
+
 // ---------- eGov AI ----------
 
 let aiToken = { value: null, exp: 0 };
@@ -209,12 +247,13 @@ let healthCache = { at: 0, data: null };
 
 export async function serviceHealth() {
   if (healthCache.data && Date.now() - healthCache.at < 30000) return healthCache.data;
-  const [sso, everify, emessage, egovai] = await Promise.all([
+  const [sso, everify, emessage, egovai, faceliveness] = await Promise.all([
     ping(env('SSO_BASE')),
     ping(env('EVERIFY_BASE')),
     ping(env('EMESSAGE_BASE')),
     ping(env('EGOVAI_BASE')),
+    ping(FACE_BASE()),
   ]);
-  healthCache = { at: Date.now(), data: { sso, everify, emessage, egovai } };
+  healthCache = { at: Date.now(), data: { sso, everify, emessage, egovai, faceliveness } };
   return healthCache.data;
 }

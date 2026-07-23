@@ -40,11 +40,20 @@ model User {
   prcLicense     String?
   verified       Boolean  @default(false)
   everified      Boolean  @default(false)
+  /** True once the person has passed the eGov Face Liveness check at least once. */
+  liveVerified   Boolean  @default(false)
+  /** Optional secondary mobile number. eMessage reminders go to `mobile` AND this. */
+  mobile2        String?
+  /** The device that currently "owns" the escrowed key. A new phone that passes
+   *  Face Liveness recovery takes ownership, and the previous phone is locked out. */
+  activeDeviceId String?
   createdAt      DateTime @default(now())
 
   consultationsAsPatient Consultation[] @relation("patient")
   consultationsAsDoctor  Consultation[] @relation("doctor")
   medications            Medication[]
+  keyEscrow              KeyEscrow?
+  pii                    PatientPII?
 
   // One National ID resolves to one eVerify uniqid, but the same person may be
   // both a patient (Health ID) and a professional. Uniqueness is per-role so a
@@ -85,6 +94,55 @@ model Medication {
   updatedAt      DateTime  @updatedAt
 
   patient User @relation(fields: [patientId], references: [id])
+}
+
+/**
+ * Server-side escrow of a patient's consultation encryption key.
+ *
+ * The key still lives on the patient's phone and inside their Health ID QR, so
+ * day-to-day the server only ever stores ciphertext it cannot read. But so a
+ * NEW phone can recover past records, the key is also kept here — wrapped with
+ * KEY_ESCROW_SECRET (AES-256-GCM) — and released only after the patient passes
+ * an eGov Face Liveness check. Face Liveness is therefore the master key: the
+ * phone key follows whichever single device most recently proved liveness.
+ */
+model KeyEscrow {
+  userId     String   @id
+  wrappedKey String
+  iv         String
+  tag        String
+  keyVersion Int      @default(1)
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * Full registration PII, captured from eVerify (PhilSys) at sign-up and stored
+ * encrypted-at-rest (AES-256-GCM) with PII_ENCRYPTION_KEY. Kept apart from the
+ * operational User row so the sensitive record can be decrypted on demand by
+ * the key holder only.
+ */
+model PatientPII {
+  userId     String   @id
+  ciphertext String
+  iv         String
+  tag        String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/** Audit trail of eGov Face Liveness sessions (create + verification result). */
+model LivenessCheck {
+  id        String   @id @default(cuid())
+  userId    String?
+  token     String   @unique
+  purpose   String
+  status    String   @default("PENDING")
+  score     Float?
+  createdAt DateTime @default(now())
 }
 
 model SmsLog {

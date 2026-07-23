@@ -36,19 +36,24 @@ export function requireAuth(req, res, next) {
   next();
 }
 
-/** Short-lived signed ticket carrying a server-verified eVerify identity. */
-export function issueTicket(identity) {
+/**
+ * Short-lived signed ticket carrying a server-verified eVerify identity, plus
+ * the raw eVerify payload so registration can store the full PII record without
+ * a second round-trip. `raw` is optional (mock SSO has none).
+ */
+export function issueTicket(identity, raw = null) {
   const payload = Buffer.from(
-    JSON.stringify({ kind: 'identity', identity, exp: Date.now() + 1000 * 60 * 15 }),
+    JSON.stringify({ kind: 'identity', identity, raw, exp: Date.now() + 1000 * 60 * 15 }),
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
+/** Returns { identity, raw } (or null). */
 export function readTicket(ticket) {
   const data = verifyRaw(ticket);
   if (!data || data.kind !== 'identity' || data.exp < Date.now()) return null;
-  return data.identity;
+  return { identity: data.identity, raw: data.raw ?? null };
 }
 
 function verifyRaw(token) {

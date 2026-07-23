@@ -26,6 +26,7 @@ export default function EditProfileScreen() {
   const [lastName, setLastName] = useState(user?.lastName ?? '');
   const [suffix, setSuffix] = useState(user?.suffix ?? '');
   const [mobile, setMobile] = useState(user?.mobile ?? '+639');
+  const [mobile2, setMobile2] = useState(user?.mobile2 ?? '');
   const [bloodType, setBloodType] = useState<string>(user?.bloodType ?? 'unknown');
   const [emergencyName, setEmergencyName] = useState(user?.emergencyName ?? '');
   const [emergencyPhone, setEmergencyPhone] = useState(user?.emergencyPhone ?? '+639');
@@ -46,6 +47,7 @@ export default function EditProfileScreen() {
         lastName: lastName.trim(),
         suffix: suffix.trim() || undefined,
         mobile: mobile.trim(),
+        mobile2: mobile2.trim() || undefined,
         bloodType,
         emergencyName: emergencyName.trim(),
         emergencyPhone: emergencyPhone.trim(),
@@ -82,6 +84,13 @@ export default function EditProfileScreen() {
         <TextField label="Last name" value={lastName} onChangeText={setLastName} />
         <TextField label="Suffix" value={suffix} onChangeText={setSuffix} />
         <TextField label="Mobile number" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} hint="Used for SMS medication reminders (+639XXXXXXXXX)" />
+        <TextField
+          label="Second mobile number (optional)"
+          keyboardType="phone-pad"
+          value={mobile2}
+          onChangeText={setMobile2}
+          hint="eMessage reminders are also sent here (e.g. a caregiver's number)"
+        />
         <View style={styles.group}>
           <AppText variant="label">Blood type</AppText>
           <View style={styles.chips}>

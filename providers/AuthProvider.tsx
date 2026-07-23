@@ -4,6 +4,7 @@ import { serverApi } from '@/services/api/server';
 import { setAuthToken } from '@/services/api/http';
 import type { AgapaiSession, ServerUser, VerifiedIdentity } from '@/types';
 import { makePatientKey } from '@/utils/crypto';
+import { getDeviceId } from '@/utils/device';
 import { readJson, removeKeys, writeJson } from '@/utils/storage';
 
 const SESSION_KEY = 'agapai/session-v2';
@@ -20,6 +21,7 @@ interface RegisterInput {
   emergencyName?: string;
   emergencyPhone?: string;
   mobile?: string;
+  mobile2?: string;
 }
 
 interface PendingIdentity {
@@ -39,6 +41,8 @@ interface AuthContextValue {
   /** Complete first-time registration → creates the Health ID. */
   register: (input: RegisterInput) => Promise<void>;
   updateUser: (user: ServerUser) => Promise<void>;
+  /** Store a Face-Liveness-recovered consultation key and unlock records. */
+  recoverPatientKey: (patientKey: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -77,22 +81,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const persistSession = useCallback(async (token: string, user: ServerUser) => {
-    setAuthToken(token);
-    let patientKey: string | undefined;
-    if (user.role === 'PATIENT') {
-      patientKey = (await readJson<string | null>(patientKeyStorage(user.id), null)) ?? undefined;
-      if (!patientKey) {
-        patientKey = await makePatientKey();
-        await writeJson(patientKeyStorage(user.id), patientKey);
+  const persistSession = useCallback(
+    async (token: string, user: ServerUser, opts: { isRegistration?: boolean } = {}) => {
+      setAuthToken(token);
+      let patientKey: string | undefined;
+      if (user.role === 'PATIENT') {
+        const deviceId = await getDeviceId();
+        const localKey = (await readJson<string | null>(patientKeyStorage(user.id), null)) ?? undefined;
+        if (localKey) {
+          // Same phone (or re-login here): reuse the key and make sure it is
+          // escrowed so a future phone can recover it. Idempotent.
+          patientKey = localKey;
+          void serverApi.escrowKey(localKey, deviceId).catch(() => {});
+        } else if (opts.isRegistration) {
+          // Brand-new account: mint the key and escrow it under the liveness gate.
+          patientKey = await makePatientKey();
+          await writeJson(patientKeyStorage(user.id), patientKey);
+          void serverApi.escrowKey(patientKey, deviceId).catch(() => {});
+        } else {
+          // Registered account on a NEW phone: do NOT mint a fresh key (that
+          // would orphan every past record). Records stay locked until the
+          // patient recovers the escrowed key via Face Liveness.
+          patientKey = undefined;
+        }
       }
-    }
-    const next: AgapaiSession = { token, user, patientKey };
-    await writeJson(SESSION_KEY, next);
-    setSession(next);
-    setPending(null);
-    setStatus('signedIn');
-  }, []);
+      const next: AgapaiSession = { token, user, patientKey };
+      await writeJson(SESSION_KEY, next);
+      setSession(next);
+      setPending(null);
+      setStatus('signedIn');
+    },
+    [],
+  );
+
+  /**
+   * After a successful Face Liveness recovery on a new phone: persist the
+   * recovered key locally and unlock records in the live session.
+   */
+  const recoverPatientKey = useCallback(
+    async (patientKey: string) => {
+      if (!session) return;
+      await writeJson(patientKeyStorage(session.user.id), patientKey);
+      const next = { ...session, patientKey };
+      setSession(next);
+      await writeJson(SESSION_KEY, next);
+    },
+    [session],
+  );
 
   const signInWithNationalId = useCallback(
     async (qrValue: string) => {
@@ -129,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: 'PATIENT',
           ...input,
         });
-        await persistSession(token, user);
+        await persistSession(token, user, { isRegistration: true });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
         throw err;
@@ -169,9 +204,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithNationalId,
       register,
       updateUser,
+      recoverPatientKey,
       signOut,
     }),
-    [status, session, pending, signingIn, error, signInWithNationalId, register, updateUser, signOut],
+    [
+      status,
+      session,
+      pending,
+      signingIn,
+      error,
+      signInWithNationalId,
+      register,
+      updateUser,
+      recoverPatientKey,
+      signOut,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -125,7 +125,12 @@ async function bridge(client, auth, documentText) {
     if (client.readyState !== client.OPEN) return;
     // Upstream frames may be Blob (native WebSocket) or string.
     const data = typeof ev.data === 'string' ? ev.data : Buffer.from(await ev.data.arrayBuffer());
-    client.send(stripThoughts(data));
+    // Every Gemini Live frame (setupComplete, audio inlineData, turnComplete) is
+    // JSON text. The phone's WebSocket handler only parses STRING frames, so we
+    // must forward a string — sending a Buffer produces a binary frame that the
+    // client silently drops, which left it stuck on "Connecting…" forever.
+    const out = stripThoughts(data);
+    client.send(typeof out === 'string' ? out : out.toString('utf8'));
   };
 
   upstream.onerror = () => closeBoth(1011, 'upstream error');

@@ -33,6 +33,9 @@ export default function MedicationDetailScreen() {
   const { speaking, toggle } = useSpeech();
 
   const medication = id ? getMedication(id) : undefined;
+  // `srv-` rows are prescribed by a doctor or dispensed by a pharmacy — they are
+  // managed on the professional side and cannot be edited by the patient.
+  const isPrescribed = !!id && id.startsWith('srv-');
 
   const history = useMemo(() => {
     if (!medication) return [];
@@ -162,21 +165,34 @@ export default function MedicationDetailScreen() {
         </View>
       )}
 
-      <View style={styles.actions}>
-        <Button
-          label="Edit medicine"
-          variant="secondary"
-          icon={<Ionicons name="create-outline" size={20} color={colors.primary} />}
-          onPress={() => router.push(`/medication/add?id=${medication.id}`)}
-        />
-        <Button
-          label="Remove medicine"
-          variant="danger"
-          icon={<Ionicons name="trash-outline" size={20} color={colors.onDanger} />}
-          onPress={confirmDelete}
-          accessibilityHint={`Deletes ${medication.name}`}
-        />
-      </View>
+      {isPrescribed ? (
+        <View style={styles.prescribedNote}>
+          <Ionicons name="lock-closed" size={18} color={colors.textSecondary} />
+          <AppText variant="caption" color="secondary" style={styles.flex}>
+            {medication.prescribingDoctor?.includes('Pharmacy')
+              ? 'Dispensed by a pharmacy'
+              : 'Prescribed by your doctor'}
+            . These details are managed for you and can&apos;t be edited here — they stay in sync
+            with your official record and reminders.
+          </AppText>
+        </View>
+      ) : (
+        <View style={styles.actions}>
+          <Button
+            label="Edit medicine"
+            variant="secondary"
+            icon={<Ionicons name="create-outline" size={20} color={colors.primary} />}
+            onPress={() => router.push(`/medication/add?id=${medication.id}`)}
+          />
+          <Button
+            label="Remove medicine"
+            variant="danger"
+            icon={<Ionicons name="trash-outline" size={20} color={colors.onDanger} />}
+            onPress={confirmDelete}
+            accessibilityHint={`Deletes ${medication.name}`}
+          />
+        </View>
+      )}
     </Screen>
   );
 }
@@ -189,4 +205,13 @@ const styles = StyleSheet.create({
   history: { gap: spacing.md },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   actions: { gap: spacing.md, marginTop: spacing.xxl },
+  prescribedNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.xxl,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 12,
+    padding: spacing.lg,
+  },
 });

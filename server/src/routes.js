@@ -4,13 +4,17 @@ import { prisma } from './db.js';
 import {
   aiAssistant,
   aiCredits,
+  createLivenessSession,
   everifyQrCheck,
   extractDocument,
   extractedText,
+  getLivenessResult,
   sendSms,
   serviceHealth,
   ssoExchange,
 } from './egov.js';
+import { encryptPii, unwrapKey, wrapKey } from './crypto.js';
+import { buildPiiRecord } from './pii.js';
 import { askGemini, geminiEnabled } from './gemini.js';
 import {
   buildHealthReply,
@@ -38,13 +42,39 @@ const publicUser = (u) => ({
   bloodType: u.bloodType,
   allergies: JSON.parse(u.allergies || '[]'),
   conditions: JSON.parse(u.conditions || '[]'),
+  mobile2: u.mobile2,
   emergencyName: u.emergencyName,
   emergencyPhone: u.emergencyPhone,
   prcLicense: u.prcLicense,
   verified: u.verified,
   everified: u.everified,
+  liveVerified: u.liveVerified,
+  activeDeviceId: u.activeDeviceId,
   createdAt: u.createdAt,
 });
+
+/**
+ * Resolve a Face Liveness session token to a pass/fail, recording the audit
+ * row. Optionally binds the check to a user. Returns { ok, score }.
+ */
+async function verifyLivenessToken(token, { purpose = 'generic', userId = null } = {}) {
+  if (!token) return { ok: false, score: 0, error: 'liveness token required' };
+  let result;
+  try {
+    result = await getLivenessResult(token);
+  } catch (err) {
+    console.error('[liveness] result fetch failed:', err.status, err.message);
+    return { ok: false, score: 0, error: 'Could not verify the Face Liveness result.' };
+  }
+  await prisma.livenessCheck
+    .upsert({
+      where: { token },
+      update: { status: result.status, score: result.score, userId: userId ?? undefined },
+      create: { token, purpose, userId: userId ?? undefined, status: result.status, score: result.score },
+    })
+    .catch(() => {});
+  return result;
+}
 
 const PRO_ROLES = ['DOCTOR', 'PHARMACIST'];
 
@@ -163,8 +193,10 @@ api.post(
     if (user) {
       return res.json({ registered: true, user: publicUser(user), token: issueToken(user), identity });
     }
-    // First time: hand back a short-lived signed ticket for registration.
-    res.json({ registered: false, identity, ticket: issueTicket(identity) });
+    // First time: hand back a short-lived signed ticket for registration. The
+    // raw eVerify payload rides along (server-signed) so registration can store
+    // the full PII record without re-querying eVerify.
+    res.json({ registered: false, identity, ticket: issueTicket(identity, data) });
   }),
 );
 
@@ -176,9 +208,12 @@ api.post(
 
     // Real path: identity fields come only from the server-issued eVerify ticket.
     let identity = null;
+    let raw = null;
     if (b.ticket) {
-      identity = readTicket(b.ticket);
-      if (!identity) return res.status(401).json({ error: 'Identity ticket invalid or expired — scan your National ID again.' });
+      const ticketData = readTicket(b.ticket);
+      if (!ticketData) return res.status(401).json({ error: 'Identity ticket invalid or expired — scan your National ID again.' });
+      identity = ticketData.identity;
+      raw = ticketData.raw;
     } else if (!String(b.egovUniqid ?? '').startsWith('MOCK-')) {
       return res.status(422).json({ error: 'Registration requires an eVerify identity ticket.' });
     }
@@ -188,6 +223,21 @@ api.post(
     const lastName = identity?.lastName ?? b.lastName;
     if (!firstName || !lastName) return res.status(422).json({ error: 'Verified identity is incomplete.' });
 
+    // Optional Face Liveness proof captured right after eVerify. When present it
+    // must be a genuine live person (SUCCEEDED >= 95); the pro app requires it.
+    let liveVerified = false;
+    if (b.livenessToken) {
+      const live = await verifyLivenessToken(b.livenessToken, { purpose: `register:${role}` });
+      if (!live.ok)
+        return res.status(403).json({
+          error: `Face Liveness check did not pass (${live.status ?? 'no result'}${
+            live.score ? `, score ${live.score}` : ''
+          }). Please try the liveness test again.`,
+          liveness: live,
+        });
+      liveVerified = true;
+    }
+
     // Scoped to the role being registered: a pro account must not be handed
     // back to someone creating their Health ID (or vice versa).
     if (egovUniqid) {
@@ -195,6 +245,7 @@ api.post(
       if (existing)
         return res.json({ user: publicUser(existing), token: issueToken(existing), existed: true });
     }
+    const mobile = b.mobile ?? identity?.mobile ?? null;
     const user = await prisma.user.create({
       data: {
         egovUniqid,
@@ -207,7 +258,8 @@ api.post(
         // Self-declared at registration: eVerify carries a sex marker, never pronouns.
         gender: b.gender ?? identity?.gender ?? null,
         pronouns: b.pronouns ?? null,
-        mobile: b.mobile ?? identity?.mobile ?? null,
+        mobile,
+        mobile2: b.mobile2 || null,
         bloodType: b.bloodType ?? identity?.bloodType ?? null,
         allergies: JSON.stringify(b.allergies || []),
         conditions: JSON.stringify(b.conditions || []),
@@ -215,8 +267,24 @@ api.post(
         emergencyPhone: b.emergencyPhone || null,
         verified: role === 'PATIENT',
         everified: Boolean(identity),
+        liveVerified,
       },
     });
+
+    // Patient PII: store the full record from eVerify, encrypted at rest.
+    if (role === 'PATIENT' && (raw || identity)) {
+      const record = buildPiiRecord(raw ?? {}, identity ?? {}, {
+        email: b.email,
+        gender: b.gender,
+        bloodType: b.bloodType,
+        mobile,
+        mobile2: b.mobile2,
+      });
+      await prisma.patientPII
+        .create({ data: { userId: user.id, ...encryptPii(record) } })
+        .catch((err) => console.error('[pii] store failed:', err.message));
+    }
+
     res.json({ user: publicUser(user), token: issueToken(user) });
   }),
 );
@@ -246,6 +314,7 @@ api.patch(
       'gender',
       'pronouns',
       'mobile',
+      'mobile2',
       'bloodType',
       'emergencyName',
       'emergencyPhone',
@@ -294,6 +363,115 @@ api.post(
     }
     await prisma.user.update({ where: { id: me.id }, data: { everified: true } });
     res.json({ verified: true, score });
+  }),
+);
+
+/**
+ * Edit-unlock via Face Liveness — the alternative to eVerify when the patient
+ * is on a new phone. A passing liveness check (SUCCEEDED >= 95) proves a live
+ * person and unlocks editing personal information.
+ */
+api.post(
+  '/identity/liveness-unlock',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { livenessToken } = req.body || {};
+    const live = await verifyLivenessToken(livenessToken, { purpose: 'edit-unlock', userId: req.auth.id });
+    if (!live.ok)
+      return res.status(403).json({
+        error: `Face Liveness check did not pass (${live.status ?? 'no result'}).`,
+        liveness: live,
+      });
+    await prisma.user.update({ where: { id: req.auth.id }, data: { everified: true, liveVerified: true } });
+    res.json({ verified: true, score: live.score });
+  }),
+);
+
+// ---------- Face Liveness ----------
+
+/**
+ * Start a Face Liveness session. The app opens the returned `url` in a WebView.
+ * Public: registration needs it before an account exists. `action` defaults to
+ * `post` (the WebView posts the result back); `redirect` needs a callbackUrl.
+ */
+api.post(
+  '/liveness/session',
+  wrap(async (req, res) => {
+    const { action, callbackUrl, delay } = req.body || {};
+    const session = await createLivenessSession({ action, callbackUrl, delay });
+    await prisma.livenessCheck
+      .create({ data: { token: session.token, purpose: req.body?.purpose || 'session', status: 'PENDING' } })
+      .catch(() => {});
+    res.json(session);
+  }),
+);
+
+/** Verify a completed liveness session token (SUCCEEDED and score >= 95). */
+api.post(
+  '/liveness/verify',
+  wrap(async (req, res) => {
+    const { token, purpose } = req.body || {};
+    if (!token) return res.status(422).json({ error: 'token required' });
+    const result = await verifyLivenessToken(token, { purpose: purpose || 'verify' });
+    res.json(result);
+  }),
+);
+
+// ---------- Consultation key escrow (Face Liveness = master key) ----------
+
+/**
+ * The patient's phone escrows its consultation key here (wrapped at rest). The
+ * key never leaves as plaintext except back to a device that has proven Face
+ * Liveness. The calling device becomes the active device.
+ */
+api.post(
+  '/keys/escrow',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { patientKey, deviceId } = req.body || {};
+    if (!patientKey) return res.status(422).json({ error: 'patientKey required' });
+    const wrapped = wrapKey(patientKey);
+    await prisma.keyEscrow.upsert({
+      where: { userId: req.auth.id },
+      update: { ...wrapped },
+      create: { userId: req.auth.id, ...wrapped },
+    });
+    if (deviceId) {
+      await prisma.user.update({ where: { id: req.auth.id }, data: { activeDeviceId: deviceId } }).catch(() => {});
+    }
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * Recover the escrowed key onto a NEW phone. Requires a passing Face Liveness
+ * token: liveness is the master key. On success the new device becomes the sole
+ * active device — the old phone is locked out (its deviceId no longer matches).
+ */
+api.post(
+  '/keys/recover',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { livenessToken, deviceId } = req.body || {};
+    const live = await verifyLivenessToken(livenessToken, { purpose: 'key-recovery', userId: req.auth.id });
+    if (!live.ok)
+      return res.status(403).json({
+        error: `Face Liveness check did not pass (${live.status ?? 'no result'}). Records stay locked.`,
+        liveness: live,
+      });
+    const escrow = await prisma.keyEscrow.findUnique({ where: { userId: req.auth.id } });
+    if (!escrow) return res.status(404).json({ error: 'No escrowed key for this account yet.' });
+    let patientKey;
+    try {
+      patientKey = unwrapKey(escrow);
+    } catch {
+      return res.status(500).json({ error: 'Escrowed key could not be unwrapped.' });
+    }
+    await prisma.user.update({
+      where: { id: req.auth.id },
+      data: { activeDeviceId: deviceId || null, liveVerified: true },
+    });
+    res.json({ patientKey, score: live.score });
   }),
 );
 
@@ -396,7 +574,34 @@ api.post(
         hasRxImage: !!b.hasRxImage,
       },
     });
-    res.json({ consultation });
+
+    // Auto-apply: the prescription list is sent in the clear alongside the
+    // encrypted record so the medicines land in the patient's system
+    // immediately (no need to open the consultation and tap "add"), power the
+    // SMS reminder cron, and stay doctor-managed (read-only for the patient).
+    const rx = Array.isArray(b.prescriptions) ? b.prescriptions : [];
+    let medications = [];
+    if (rx.length > 0) {
+      medications = await Promise.all(
+        rx
+          .filter((p) => p && p.name)
+          .map((p) =>
+            prisma.medication.create({
+              data: {
+                patientId: b.patientId,
+                name: String(p.name),
+                dosage: p.dosage ? String(p.dosage) : '',
+                instructions: p.instructions || null,
+                times: JSON.stringify(Array.isArray(p.times) ? p.times : []),
+                quantity: p.quantity ?? null,
+                source: 'DOCTOR',
+                consultationId: consultation.id,
+              },
+            }),
+          ),
+      );
+    }
+    res.json({ consultation, medicationsCreated: medications.length });
   }),
 );
 
@@ -549,9 +754,55 @@ api.get(
     try {
       credits = await aiCredits();
     } catch {}
+
+    // Requests per hour over the last 24h (for the traffic chart).
+    const recentMetrics = await prisma.metric.findMany({
+      where: { at: { gte: dayAgo } },
+      select: { at: true, status: true, ms: true },
+    });
+    const hourly = Array.from({ length: 24 }, (_, i) => {
+      const h = new Date(Date.now() - (23 - i) * 3600 * 1000);
+      return { hour: `${String(h.getHours()).padStart(2, '0')}:00`, requests: 0, errors: 0 };
+    });
+    const nowH = new Date();
+    for (const m of recentMetrics) {
+      const diffH = Math.floor((nowH - new Date(m.at)) / 3600000);
+      const idx = 23 - diffH;
+      if (idx >= 0 && idx < 24) {
+        hourly[idx].requests += 1;
+        if (m.status >= 400) hourly[idx].errors += 1;
+      }
+    }
+
+    // Signups per day over the last 14 days (for the growth chart).
+    const twoWeeks = new Date(Date.now() - 14 * 24 * 3600 * 1000);
+    const newUsers = await prisma.user.findMany({
+      where: { createdAt: { gte: twoWeeks } },
+      select: { createdAt: true, role: true },
+    });
+    const dailyMap = new Map();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      dailyMap.set(d, { date: d, patients: 0, professionals: 0 });
+    }
+    for (const u of newUsers) {
+      const d = new Date(u.createdAt).toISOString().slice(0, 10);
+      const row = dailyMap.get(d);
+      if (row) row[u.role === 'PATIENT' ? 'patients' : 'professionals'] += 1;
+    }
+
     res.json({
       counts: { patients, doctors, pharmacists, pending, consultations, sms },
       traffic: { last24h: reqs24h, avgMs: Math.round(avg._avg.ms || 0) },
+      charts: {
+        roles: [
+          { name: 'Patients', value: patients },
+          { name: 'Doctors', value: doctors },
+          { name: 'Pharmacists', value: pharmacists },
+        ],
+        hourly,
+        daily: Array.from(dailyMap.values()),
+      },
       services: await serviceHealth(),
       aiCredits: credits,
     });
@@ -570,9 +821,73 @@ api.get(
 api.get(
   '/admin/users',
   requireAdmin,
-  wrap(async (_req, res) => {
-    const users = await prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
-    res.json({ users: users.map(publicUser) });
+  wrap(async (req, res) => {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 10));
+    const q = String(req.query.q || '').trim();
+    const roleFilter = String(req.query.role || '').toUpperCase();
+    const where = {
+      ...(q
+        ? {
+            OR: [
+              { firstName: { contains: q, mode: 'insensitive' } },
+              { lastName: { contains: q, mode: 'insensitive' } },
+              { prcLicense: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      ...(['PATIENT', 'DOCTOR', 'PHARMACIST'].includes(roleFilter) ? { role: roleFilter } : {}),
+    };
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    res.json({
+      users: users.map(publicUser),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }),
+);
+
+/** Delete a registered professional. Patients are protected (their PII/records
+ *  cascade-delete, so admins can't remove a patient account from here). */
+api.delete(
+  '/admin/users/:id',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!PRO_ROLES.includes(user.role))
+      return res.status(403).json({ error: 'Only doctor/pharmacist accounts can be deleted here.' });
+    // A professional never has patient consultations, but be safe.
+    await prisma.medication.deleteMany({ where: { patientId: user.id } }).catch(() => {});
+    await prisma.user.delete({ where: { id: user.id } });
+    res.json({ ok: true, deleted: user.id });
+  }),
+);
+
+/** Change a professional's role between DOCTOR and PHARMACIST. */
+api.patch(
+  '/admin/users/:id/role',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const role = String(req.body?.role || '').toUpperCase();
+    if (!PRO_ROLES.includes(role))
+      return res.status(422).json({ error: 'role must be DOCTOR or PHARMACIST' });
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!PRO_ROLES.includes(user.role))
+      return res.status(403).json({ error: 'Only registered professionals can have their role changed.' });
+    const updated = await prisma.user.update({ where: { id: user.id }, data: { role } });
+    res.json({ user: publicUser(updated) });
   }),
 );
 
