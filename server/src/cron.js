@@ -39,7 +39,7 @@ export async function runSmsSweep() {
   const { date, minutes: nowMin } = manilaNow();
   const meds = await prisma.medication.findMany({
     where: { active: true },
-    include: { patient: { select: { id: true, role: true, mobile: true, firstName: true } } },
+    include: { patient: { select: { id: true, role: true, mobile: true, mobile2: true, firstName: true } } },
   });
 
   const byPatient = new Map();
@@ -68,11 +68,21 @@ export async function runSmsSweep() {
     const message =
       `AgapAI: Hi ${patient.firstName}! Medication reminder — ${firstTwo.join(', ')}. ` +
       `Open the AgapAI app to see your remaining medications for today.`;
-    const out = await sendSms(patient.mobile, message);
+    // Reminders go to the primary number AND the optional secondary number.
+    const numbers = [patient.mobile, patient.mobile2].filter(
+      (n, i, arr) => n && arr.indexOf(n) === i,
+    );
+    const results = await Promise.all(numbers.map((n) => sendSms(n, message)));
+    const anyOk = results.some((r) => r.ok);
+    const status = anyOk
+      ? results.every((r) => r.ok)
+        ? 'sent'
+        : 'partial'
+      : `failed:${results[0]?.status ?? 'none'}`;
     await prisma.smsLog.create({
-      data: { patientId: patient.id, dedupeKey, message, status: out.ok ? 'sent' : `failed:${out.status}` },
+      data: { patientId: patient.id, dedupeKey, message, status },
     });
-    console.log(`[sms] ${patient.mobile} → ${out.ok ? 'sent' : 'FAILED'} (${out.status})`);
+    console.log(`[sms] ${numbers.join(', ')} → ${status}`);
   }
 }
 
