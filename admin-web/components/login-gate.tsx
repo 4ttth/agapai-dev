@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
 
 import { adminFetch, setAdminKey } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -33,10 +32,9 @@ export function LoginGate({ onAuthed }: { onAuthed: () => void }) {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary/10 via-background to-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <ShieldCheck className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-xl">AgapAI Admin</CardTitle>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/agapai-logo.png" alt="AgapAI" className="mb-3 h-12 w-auto object-contain" />
+          <CardTitle className="text-xl">Admin Console</CardTitle>
           <CardDescription>Enter the ADMIN_KEY configured on the server.</CardDescription>
         </CardHeader>
         <CardContent>

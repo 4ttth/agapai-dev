@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, TextInput, View } from 'react-native';
+import { Animated, Image, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
@@ -48,7 +48,12 @@ export default function LoginScreen() {
       >
         <Animated.View style={[styles.heroInner, { opacity: fade, transform: [{ translateY: rise }] }]}>
           <View style={styles.logo}>
-            <Ionicons name="heart" size={44} color={colors.primary} />
+            <Image
+              source={require('@/assets/icon.png')}
+              style={styles.logoImage}
+              accessibilityLabel="AgapAI logo"
+              resizeMode="contain"
+            />
           </View>
           <AppText variant="title" color="inverse" center style={styles.appName}>
             {appConfig.appName}
@@ -117,7 +122,9 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
+    overflow: 'hidden',
   },
+  logoImage: { width: 78, height: 78 },
   appName: { marginTop: spacing.sm },
   tagline: { opacity: 0.9 },
   features: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.lg, flexWrap: 'wrap', justifyContent: 'center' },

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { Activity, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 import { clearAdminKey, swrFetcher, type Overview } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -32,9 +32,12 @@ export function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       <header className="sticky top-0 z-10 border-b bg-card/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Activity className="h-5 w-5" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/agapai-icon.png"
+              alt="AgapAI"
+              className="h-9 w-9 rounded-lg border bg-white object-contain"
+            />
             <div>
               <h1 className="text-lg font-semibold leading-tight">AgapAI — Admin Console</h1>
               <p className="text-xs text-muted-foreground">Service health · usage · verification</p>
