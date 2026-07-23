@@ -25,6 +25,26 @@ nano .env   # paste the eGov credentials (Appendix A of egovdocumentation.md),
 
 Optionally set `DB_PASSWORD` in `.env` (defaults to `agapai`).
 
+### New secrets for Face Liveness + encrypted PII
+
+Add these to `server/.env` (see `server/.env.example`):
+
+```
+FACE_LIVENESS_BASE=https://hackathon-face-liveness.e.gov.ph
+FACE_LIVENESS_API_KEY=<your Face Liveness api-key>
+PII_ENCRYPTION_KEY=<32+ char key that decrypts the patient PII store>
+KEY_ESCROW_SECRET=<random secret; wraps escrowed consultation keys>
+```
+
+`prisma db push` (run automatically by the `api` container on boot) creates the
+new tables: `KeyEscrow`, `PatientPII`, `LivenessCheck`, and the new `User`
+columns. Decrypt the PII store any time with:
+
+```bash
+sudo docker compose exec api node scripts/decrypt-pii.js            # all
+sudo docker compose exec api node scripts/decrypt-pii.js <userId>   # one
+```
+
 ## 3. Launch
 
 ```bash
@@ -40,7 +60,9 @@ Check:
 curl http://localhost:4000/api/health
 ```
 
-- Admin console: `http://<VPS_IP>:4000/admin` → enter your `ADMIN_KEY`.
+- Admin console (legacy single-file): `http://<VPS_IP>:4000/admin` → `ADMIN_KEY`.
+- Admin console (new shadcn-ui app): see `admin-web/README.md` — run it with
+  `NEXT_PUBLIC_API_URL=http://<VPS_IP>:4000` and sign in with the same key.
 - Logs: `sudo docker compose logs -f api`
 
 ## 4. Point the mobile apps at the VPS
