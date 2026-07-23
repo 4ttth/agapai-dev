@@ -35,7 +35,7 @@ export function UsersTable() {
   const [q, setQ] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
   // Confirmations / edits target a single user at a time.
-  const [toDelete, setToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [toDelete, setToDelete] = useState<{ id: string; name: string; role: string } | null>(null);
   const [editRole, setEditRole] = useState<{ id: string; name: string; role: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -81,7 +81,8 @@ export function UsersTable() {
         <div className="space-y-1.5">
           <CardTitle>Users</CardTitle>
           <CardDescription>
-            {data ? `${data.total} total` : 'Loading…'} · admin actions apply to doctors &amp; pharmacists
+            {data ? `${data.total} total` : 'Loading…'} · delete any account; role edits apply to
+            doctors &amp; pharmacists
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -159,8 +160,8 @@ export function UsersTable() {
                         {new Date(u.createdAt).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isPro ? (
-                          <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-1">
+                          {isPro ? (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -170,19 +171,19 @@ export function UsersTable() {
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              title="Delete account"
-                              onClick={() => setToDelete({ id: u.id, name: `${u.firstName} ${u.lastName}` })}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            title="Delete account"
+                            onClick={() =>
+                              setToDelete({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: u.role })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -223,7 +224,10 @@ export function UsersTable() {
           <DialogHeader>
             <DialogTitle>Delete {toDelete?.name}?</DialogTitle>
             <DialogDescription>
-              This permanently removes the professional account. This action cannot be undone.
+              {toDelete?.role === 'PATIENT'
+                ? 'This permanently deletes the patient account and all of their data — consultations, medications, SMS log, escrowed key, and encrypted PII record.'
+                : 'This permanently removes the professional account.'}{' '}
+              This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
