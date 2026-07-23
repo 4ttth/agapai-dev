@@ -244,7 +244,15 @@ export function useGeminiLive() {
 
         ws.onerror = () => {
           if (stoppingRef.current) return;
-          setError('Lost connection to the assistant.');
+          // A failure before setup completed means we never reached a live call
+          // — usually the relay is unreachable or the voice assistant isn't
+          // configured on the server. Say so instead of failing silently, which
+          // reads to the patient as "the assistant isn't responding."
+          setError(
+            readyRef.current
+              ? 'Lost connection to the assistant. Tap the mic to reconnect.'
+              : "Couldn't reach the voice assistant. It may be unavailable right now — tap Type to chat instead.",
+          );
           setState('error');
           teardown();
         };
@@ -255,7 +263,19 @@ export function useGeminiLive() {
           flushUser();
           flushAi();
           teardown();
-          setState((s) => (s === 'error' ? s : 'idle'));
+          // If the socket closed before the call ever went live, surface it as
+          // an error so the UI doesn't just fall back to "Tap to talk" with no
+          // explanation (which looks like the assistant ignoring the patient).
+          if (!readyRef.current) {
+            setError(
+              (prev) =>
+                prev ??
+                "The voice assistant didn't start. It may be unavailable right now — you can tap Type to chat instead.",
+            );
+            setState('error');
+          } else {
+            setState((s) => (s === 'error' ? s : 'idle'));
+          }
         };
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not start the voice assistant.');

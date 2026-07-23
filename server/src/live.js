@@ -114,19 +114,22 @@ async function bridge(client, auth, documentText) {
           systemInstruction: {
             parts: [{ text: VOICE_PROMPT + persona + documentLines(documentText) }],
           },
-          // Make voice-activity detection deliberately hard to trigger so that
-          // background/environmental sounds don't get mistaken for the patient
-          // interrupting — that false barge-in was cutting the assistant off
-          // mid-sentence. LOW start sensitivity needs clearer speech to begin a
-          // turn; a longer end-silence keeps it from ending the user's turn on a
-          // brief noise; both also cut the "doubling" from spurious interrupts.
+          // Voice-activity detection must reliably notice the patient has begun
+          // speaking, or they talk and the assistant never answers. An earlier
+          // build set START_SENSITIVITY_LOW to avoid background noise causing a
+          // false barge-in, but that made it miss real speech — the "assistant
+          // isn't responding" bug. HIGH start sensitivity picks up ordinary
+          // speech (echo of the assistant's own voice is handled by the iOS
+          // voiceChat audio session's echo cancellation), while a moderate
+          // end-of-speech silence still lets a natural pause finish a sentence
+          // without cutting the turn off on a brief noise.
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
-              startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
-              endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+              startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+              endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               prefixPaddingMs: 300,
-              silenceDurationMs: 1200,
+              silenceDurationMs: 800,
             },
           },
           // Live transcription of both sides, so the phone can keep a local
