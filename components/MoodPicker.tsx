@@ -1,11 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radii, spacing } from '@/theme';
 import type { MoodLevel } from '@/types';
 import { MOODS, moodMeta } from '@/utils/mood';
 import { AppText } from './ui/AppText';
+
+/**
+ * Emojis must render with the system font and their own generous line height,
+ * not the app's Inter face (whose 28px line box clips the taller emoji glyphs
+ * on iOS). A plain Text with an explicit lineHeight keeps them centered and
+ * un-clipped on both platforms.
+ */
+function Emoji({ char, size }: { char: string; size: number }) {
+  return (
+    <Text allowFontScaling={false} style={[styles.emojiBase, { fontSize: size, lineHeight: size * 1.25 }]}>
+      {char}
+    </Text>
+  );
+}
 
 /**
  * Playful daily mood picker. One tap records today's mood and locks it in; a
@@ -27,7 +41,7 @@ export function MoodPicker({
     return (
       <View style={[styles.lockedCard, { backgroundColor: meta.color + '1A', borderColor: meta.color + '55' }]}>
         <View style={[styles.lockedEmojiWrap, { backgroundColor: meta.color + '2E' }]}>
-          <AppText style={styles.lockedEmoji}>{meta.emoji}</AppText>
+          <Emoji char={meta.emoji} size={28} />
         </View>
         <View style={styles.flex}>
           <AppText variant="label">You&apos;re feeling {meta.label.toLowerCase()} today</AppText>
@@ -73,12 +87,19 @@ export function MoodPicker({
                 style={[
                   styles.emojiTile,
                   { backgroundColor: m.color + '1F', borderColor: m.color + '4D' },
+                  selected && styles.emojiTileSelected,
                   selected && { backgroundColor: m.color + '38', borderColor: m.color },
                 ]}
               >
-                <AppText style={styles.emoji}>{m.emoji}</AppText>
+                <Emoji char={m.emoji} size={30} />
               </View>
-              <AppText variant="caption" color={selected ? 'primary' : 'muted'} center numberOfLines={1}>
+              <AppText
+                variant="caption"
+                color={selected ? 'primary' : 'muted'}
+                center
+                numberOfLines={1}
+                style={styles.moodLabel}
+              >
                 {m.label}
               </AppText>
             </Pressable>
@@ -107,21 +128,29 @@ export function MoodPicker({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.xs },
-  item: { flex: 1, alignItems: 'center', gap: spacing.xs },
+  row: { flexDirection: 'row', gap: spacing.sm },
+  item: { flex: 1, alignItems: 'center', gap: spacing.sm },
   itemPressed: { transform: [{ scale: 0.92 }] },
   emojiTile: {
     width: '100%',
     aspectRatio: 1,
-    maxWidth: 60,
     borderRadius: radii.lg,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emoji: { fontSize: 28 },
+  emojiTileSelected: {
+    ...Platform.select({
+      ios: { shadowColor: colors.textPrimary, shadowOpacity: 0.16, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+      android: { elevation: 3 },
+      default: {},
+    }),
+  },
+  // System font + centered so the emoji glyph isn't clipped by the app face.
+  emojiBase: { textAlign: 'center', ...Platform.select({ ios: { fontFamily: 'System' }, default: {} }) },
+  moodLabel: { fontSize: 11 },
   hint: { marginTop: spacing.md },
-  cancelRow: { alignSelf: 'center', marginTop: spacing.md },
+  cancelRow: { alignSelf: 'center', marginTop: spacing.md, paddingVertical: spacing.xs },
   lockedCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -137,7 +166,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lockedEmoji: { fontSize: 28 },
   flex: { flex: 1 },
   changeBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 });

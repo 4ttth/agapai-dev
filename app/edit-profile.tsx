@@ -83,7 +83,24 @@ export default function EditProfileScreen() {
         <TextField label="Middle name" value={middleName} onChangeText={setMiddleName} />
         <TextField label="Last name" value={lastName} onChangeText={setLastName} />
         <TextField label="Suffix" value={suffix} onChangeText={setSuffix} />
-        <TextField label="Mobile number" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} hint="Used for SMS medication reminders (+639XXXXXXXXX)" />
+        <TextField
+          label="Date of birth"
+          value={user?.birthDate ?? '—'}
+          editable={false}
+          hint="From your National ID (eVerify) — this cannot be changed."
+        />
+        <TextField
+          label="Mobile number"
+          keyboardType="phone-pad"
+          value={mobile}
+          onChangeText={setMobile}
+          editable={!user?.everified || !user?.mobile}
+          hint={
+            user?.everified && user?.mobile
+              ? 'From your National ID (eVerify) — this number cannot be changed.'
+              : 'Used for SMS medication reminders (+639XXXXXXXXX)'
+          }
+        />
         <TextField
           label="Second mobile number (optional)"
           keyboardType="phone-pad"

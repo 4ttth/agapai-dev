@@ -82,7 +82,8 @@ export default function VerifyIdentityScreen() {
             onPress={() => setPhase('scanning')}
           />
           <AppText variant="caption" color="muted" center>
-            On a new phone? Use Face Liveness instead — no National ID needed.
+            On a new phone? Use Face Liveness instead — no QR to scan. Your face is
+            matched to your registered National ID.
           </AppText>
           <Button
             label="Verify with Face Liveness"

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import type { Medication } from '@/types';
 import { parseTimeOfDay } from './datetime';
+import { DEFAULT_NOTIFICATION_PREFS, type NotificationPrefs } from './notificationPrefs';
 
 /**
  * Local (offline) medication reminders. Local notifications fire from the
@@ -82,18 +83,60 @@ export async function cancelReminders(notificationIds: string[]): Promise<void> 
   );
 }
 
+/** Schedule the daily "log your mood" reminder at the chosen time of day. */
+export async function scheduleMoodReminder(time: string): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+  const tod = parseTimeOfDay(time);
+  if (!tod) return null;
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'How are you feeling today?',
+        body: 'Take a moment to log your mood in AgapAI.',
+        data: { kind: 'mood-reminder' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour: tod.hours,
+        minute: tod.minutes,
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Reconcile all device reminders with the current medication list. We cancel
- * everything and reschedule so adds, edits, and deletes never leave duplicates.
+ * Reconcile every scheduled local notification with the current medication list
+ * AND the patient's notification preferences. We cancel everything and
+ * reschedule so adds, edits, deletes, and toggles never leave duplicates:
+ * medication dose reminders only when `medications` is on, and the daily mood
+ * reminder at `moodReminderTime` only when `moodReminder` is on.
  */
-export async function syncAllReminders(medications: Medication[]): Promise<void> {
+export async function reconcileNotifications(
+  medications: Medication[],
+  prefs: NotificationPrefs = DEFAULT_NOTIFICATION_PREFS,
+): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch {
     return;
   }
-  for (const med of medications) {
-    await scheduleMedicationReminders(med);
+  if (prefs.medications) {
+    for (const med of medications) {
+      await scheduleMedicationReminders(med);
+    }
   }
+  if (prefs.moodReminder) {
+    await scheduleMoodReminder(prefs.moodReminderTime);
+  }
+}
+
+/**
+ * Back-compat wrapper: reconcile medication reminders with the default prefs.
+ * Prefer {@link reconcileNotifications} where the patient's prefs are known.
+ */
+export async function syncAllReminders(medications: Medication[]): Promise<void> {
+  await reconcileNotifications(medications, DEFAULT_NOTIFICATION_PREFS);
 }

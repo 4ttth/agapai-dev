@@ -10,7 +10,8 @@ import {
 import { services } from '@/services';
 import type { AsyncStatus, DoseLog, Medication, NewMedicationInput } from '@/types';
 import { todayString } from '@/utils/datetime';
-import { requestNotificationPermission, syncAllReminders } from '@/utils/notifications';
+import { readNotificationPrefs } from '@/utils/notificationPrefs';
+import { reconcileNotifications, requestNotificationPermission } from '@/utils/notifications';
 
 interface MedicationContextValue {
   status: AsyncStatus;
@@ -52,6 +53,9 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
       setMedications(meds);
       setDoseLogs(logs);
       setStatus('success');
+      // Align local notifications (medication + mood reminders) with the saved
+      // list and preferences on every load.
+      void readNotificationPrefs().then((prefs) => reconcileNotifications(meds, prefs));
     } catch {
       setStatus('error');
       setError('We could not load your medicines. Please try again.');
@@ -63,23 +67,31 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
     void requestNotificationPermission().then(setRemindersEnabled);
   }, [load]);
 
+  // Reschedule medication reminders whenever the list changes, honouring the
+  // patient's notification preferences (and preserving the mood reminder, which
+  // reconcileNotifications reschedules alongside the medication ones).
+  const reschedule = useCallback(async (next: Medication[]) => {
+    const prefs = await readNotificationPrefs();
+    await reconcileNotifications(next, prefs);
+  }, []);
+
   const addMedication = useCallback(async (input: NewMedicationInput) => {
     const created = await services.medication.add(input);
     const next = [created, ...medications];
     setMedications(next);
-    void syncAllReminders(next);
+    void reschedule(next);
     return created;
-  }, [medications]);
+  }, [medications, reschedule]);
 
   const updateMedication = useCallback(
     async (id: string, input: NewMedicationInput) => {
       const updated = await services.medication.update(id, input);
       const next = medications.map((m) => (m.id === id ? updated : m));
       setMedications(next);
-      void syncAllReminders(next);
+      void reschedule(next);
       return updated;
     },
-    [medications],
+    [medications, reschedule],
   );
 
   const removeMedication = useCallback(
@@ -88,9 +100,9 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
       const next = medications.filter((m) => m.id !== id);
       setMedications(next);
       setDoseLogs((prev) => prev.filter((l) => l.medicationId !== id));
-      void syncAllReminders(next);
+      void reschedule(next);
     },
-    [medications],
+    [medications, reschedule],
   );
 
   const getMedication = useCallback(

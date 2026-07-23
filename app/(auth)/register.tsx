@@ -81,6 +81,9 @@ export default function RegisterScreen() {
   const [conditions, setConditions] = useState<string[]>([]);
   const [conditionOther, setConditionOther] = useState('');
   const [mobile, setMobile] = useState('+639');
+  // True once eVerify supplies a valid mobile number: it comes from the
+  // National ID and must not be edited on the registration field.
+  const [mobileLocked, setMobileLocked] = useState(false);
   const [mobile2, setMobile2] = useState('');
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('+639');
@@ -98,7 +101,10 @@ export default function RegisterScreen() {
     }
     if (identity?.mobile) {
       const m = identity.mobile.replace(/^0/, '+63').replace(/^63/, '+63');
-      if (/^\+639\d{9}$/.test(m)) setMobile(m);
+      if (/^\+639\d{9}$/.test(m)) {
+        setMobile(m);
+        setMobileLocked(true);
+      }
     }
     // eVerify carries a sex marker; it seeds gender but never pronouns, which
     // are always the patient's own choice.
@@ -299,8 +305,13 @@ export default function RegisterScreen() {
           keyboardType="phone-pad"
           value={mobile}
           onChangeText={setMobile}
-          hint="From your National ID. Used for SMS medication reminders (+639XXXXXXXXX)"
-          error={touched ? errors.mobile : undefined}
+          editable={!mobileLocked}
+          hint={
+            mobileLocked
+              ? 'From your National ID (eVerify) — used for SMS medication reminders. This number cannot be changed.'
+              : 'Used for SMS medication reminders (+639XXXXXXXXX)'
+          }
+          error={touched && !mobileLocked ? errors.mobile : undefined}
         />
         <TextField
           label="Second mobile number (optional)"

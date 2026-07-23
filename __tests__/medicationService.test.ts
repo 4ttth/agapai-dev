@@ -8,9 +8,9 @@ beforeEach(async () => {
 });
 
 describe('medicationService (mock, AsyncStorage-backed)', () => {
-  it('seeds medications on first read', async () => {
+  it('starts with no medications on a fresh install', async () => {
     const meds = await medicationService.list();
-    expect(meds.length).toBeGreaterThanOrEqual(3);
+    expect(meds).toHaveLength(0);
   });
 
   it('adds a medication and persists it across reads', async () => {
@@ -30,8 +30,14 @@ describe('medicationService (mock, AsyncStorage-backed)', () => {
   });
 
   it('removes a medication and its dose logs', async () => {
-    const meds = await medicationService.list();
-    const target = meds[0];
+    const target = await medicationService.add({
+      name: 'Losartan',
+      dosage: '50',
+      unit: 'mg',
+      form: 'tablet',
+      appearance: { color: 'White', colorHex: '#fff', shape: 'round' },
+      schedule: { frequency: 'once_daily', times: ['09:00'], startDate: '2026-07-22' },
+    });
     const dose: DoseLog = {
       id: `dose_${target.id}_2026-07-22_08:00`,
       medicationId: target.id,

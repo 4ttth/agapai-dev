@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radii, spacing } from '@/theme';
 import type { MoodMap } from '@/types';
@@ -81,7 +81,9 @@ export function MoodGrid({ moods }: { moods: MoodMap }) {
                   accessibilityLabel={`${cell.key}: ${meta ? meta.label : 'no entry'}`}
                 >
                   {meta ? (
-                    <AppText style={styles.emoji}>{meta.emoji}</AppText>
+                    <Text allowFontScaling={false} style={styles.emoji}>
+                      {meta.emoji}
+                    </Text>
                   ) : (
                     <AppText style={styles.dayNum} color="muted">
                       {cell.date.getDate()}
@@ -126,7 +128,12 @@ const styles = StyleSheet.create({
   },
   empty: { backgroundColor: colors.surfaceMuted, borderColor: 'transparent' },
   today: { borderWidth: 2, borderColor: colors.primary },
-  emoji: { fontSize: 13 },
+  emoji: {
+    fontSize: 14,
+    lineHeight: 18,
+    textAlign: 'center',
+    ...Platform.select({ ios: { fontFamily: 'System' }, default: {} }),
+  },
   dayNum: { fontSize: 9, opacity: 0.55 },
   legend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
 });

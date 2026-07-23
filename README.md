@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🩺 AgapAI
+<img src="assets/splash-icon.png" alt="AgapAI" width="360"/>
 
 ### Healthcare access for every Filipino — powered by **eGovPH**
 

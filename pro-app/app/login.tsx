@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FaceLivenessModal } from '@/lib/FaceLivenessModal';
@@ -53,7 +53,12 @@ export default function LoginScreen() {
     >
       <View style={styles.hero}>
         <View style={styles.logo}>
-          <Ionicons name="medkit" size={40} color={colors.onPrimary} />
+          <Image
+            source={require('@/assets/icon.png')}
+            style={styles.logoImage}
+            accessibilityLabel="AgapAI Pro logo"
+            resizeMode="contain"
+          />
         </View>
         <T size={30} weight="800" center>
           AgapAI Pro
@@ -146,10 +151,12 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: radii.pill,
-    backgroundColor: colors.primary,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  logoImage: { width: 68, height: 68 },
   card: { gap: spacing.lg },
   privacyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   identityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

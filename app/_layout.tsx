@@ -42,10 +42,25 @@ function HeaderBackButton() {
     </Pressable>
   );
 }
+import * as Notifications from 'expo-notifications';
+
 import { configureNotificationHandler } from '@/utils/notifications';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 configureNotificationHandler();
+
+/** Route a tapped reminder to the screen it's about. */
+function useNotificationRouting() {
+  const router = useRouter();
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const kind = response.notification.request.content.data?.kind;
+      if (kind === 'medication-reminder') router.push('/(tabs)/medications');
+      else if (kind === 'mood-reminder') router.push('/(tabs)');
+    });
+    return () => sub.remove();
+  }, [router]);
+}
 
 /**
  * Watches auth status and keeps the user in the right route group:
@@ -71,6 +86,7 @@ function useProtectedRoute() {
 
 function RootNavigator() {
   useProtectedRoute();
+  useNotificationRouting();
   return (
     <Stack
       screenOptions={{
@@ -98,7 +114,7 @@ function RootNavigator() {
       <Stack.Screen name="verify-identity" options={{ title: 'Verify your identity', presentation: 'modal' }} />
       <Stack.Screen name="recover-records" options={{ title: 'Recover records', presentation: 'modal' }} />
       <Stack.Screen name="edit-profile" options={{ title: 'Edit personal info' }} />
-      <Stack.Screen name="directory" options={{ title: 'Verified professionals' }} />
+      <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
       <Stack.Screen name="guide" options={{ title: 'How to use AgapAI' }} />
       <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
       <Stack.Screen name="terms" options={{ title: 'Terms & Conditions' }} />
