@@ -47,6 +47,10 @@ model User {
   /** The device that currently "owns" the escrowed key. A new phone that passes
    *  Face Liveness recovery takes ownership, and the previous phone is locked out. */
   activeDeviceId String?
+  /** Notify the patient (SMS) when a doctor saves a consultation for them. */
+  notifyPostConsult  Boolean @default(true)
+  /** Notify the patient (SMS) when a pharmacist dispenses medicine for them. */
+  notifyPostDispense Boolean @default(true)
   createdAt      DateTime @default(now())
 
   consultationsAsPatient Consultation[] @relation("patient")

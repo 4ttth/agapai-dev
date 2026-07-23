@@ -28,6 +28,10 @@ export interface ServerUser {
   everified: boolean;
   liveVerified?: boolean;
   activeDeviceId?: string | null;
+  /** Send an SMS when a doctor saves a new consultation. Default true. */
+  notifyPostConsult?: boolean;
+  /** Send an SMS when a pharmacist dispenses medicine. Default true. */
+  notifyPostDispense?: boolean;
   createdAt: string;
 }
 

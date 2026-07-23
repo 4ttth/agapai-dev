@@ -51,6 +51,8 @@ const publicUser = (u) => ({
   everified: u.everified,
   liveVerified: u.liveVerified,
   activeDeviceId: u.activeDeviceId,
+  notifyPostConsult: u.notifyPostConsult,
+  notifyPostDispense: u.notifyPostDispense,
   createdAt: u.createdAt,
 });
 
@@ -138,6 +140,24 @@ async function verifyAccountHolder(token, user, purpose) {
     };
   }
   return { ok: true, score: live.score, matched: true };
+}
+
+/**
+ * Send a one-off SMS notification to a patient (primary + optional secondary
+ * number), deduped by `dedupeKey` so a ret/re-save can't double-send. Silently
+ * no-ops when SMS is disabled or the patient has no number. Used for the
+ * post-consultation and post-dispense notifications the patient can toggle off.
+ */
+async function notifyPatientSms(patient, message, dedupeKey) {
+  if (process.env.SMS_ENABLED !== 'true' || !patient?.mobile) return;
+  const dup = await prisma.smsLog.findUnique({ where: { dedupeKey } }).catch(() => null);
+  if (dup) return;
+  const numbers = [patient.mobile, patient.mobile2].filter((n, i, arr) => n && arr.indexOf(n) === i);
+  const results = await Promise.all(numbers.map((n) => sendSms(n, message)));
+  const anyOk = results.some((r) => r.ok);
+  const status = anyOk ? (results.every((r) => r.ok) ? 'sent' : 'partial') : `failed:${results[0]?.status ?? 'none'}`;
+  await prisma.smsLog.create({ data: { patientId: patient.id, dedupeKey, message, status } }).catch(() => {});
+  console.log(`[notify] ${dedupeKey} → ${status}`);
 }
 
 const PRO_ROLES = ['DOCTOR', 'PHARMACIST'];
@@ -387,6 +407,10 @@ api.patch(
       'emergencyPhone',
     ])
       if (b[k] !== undefined) data[k] = b[k];
+
+    // Notification preferences the patient controls from the app.
+    for (const k of ['notifyPostConsult', 'notifyPostDispense'])
+      if (typeof b[k] === 'boolean') data[k] = b[k];
 
     // Identity fields come from the National ID via eVerify and are immutable
     // once verified: the birth date can never be changed, and the mobile number
@@ -689,6 +713,18 @@ api.post(
           ),
       );
     }
+    // Post-consultation notification (patient-toggleable; delivered by SMS so it
+    // arrives even when the app is closed).
+    const patient = await prisma.user.findUnique({ where: { id: b.patientId } }).catch(() => null);
+    if (patient?.notifyPostConsult) {
+      const drName = `Dr. ${doctor.firstName} ${doctor.lastName}`.replace(/\s+/g, ' ').trim();
+      const meds = medications.length
+        ? ` with ${medications.length} medicine${medications.length === 1 ? '' : 's'}`
+        : '';
+      const msg = `AgapAI: ${drName} saved a new ${consultation.type} consultation for you${meds}. Open the AgapAI app to view it.`;
+      void notifyPatientSms(patient, msg, `consult:${consultation.id}`);
+    }
+
     res.json({ consultation, medicationsCreated: medications.length });
   }),
 );
@@ -765,6 +801,17 @@ api.post(
         .update({ where: { id: consultationId }, data: { dispensedAt: new Date() } })
         .catch(() => {});
     }
+
+    // Post-dispense notification (patient-toggleable, delivered by SMS).
+    const patient = await prisma.user.findUnique({ where: { id: patientId } }).catch(() => null);
+    if (patient?.notifyPostDispense) {
+      const names = created.map((m) => m.name).filter(Boolean);
+      const list =
+        names.slice(0, 2).join(', ') + (names.length > 2 ? `, +${names.length - 2} more` : '');
+      const msg = `AgapAI: Your pharmacist dispensed ${list || 'your medicine'}. Open the AgapAI app to see your medications.`;
+      void notifyPatientSms(patient, msg, `dispense:${consultationId || created[0]?.id}`);
+    }
+
     res.json({ medications: created });
   }),
 );
