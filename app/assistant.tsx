@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -20,6 +21,8 @@ import { useSpeech } from '@/hooks/useSpeech';
 import { serverApi } from '@/services/api/server';
 import { colors, layout, palette, radii, spacing, typography } from '@/theme';
 import type { ConsultationRow } from '@/types';
+import { saveConversation } from '@/utils/conversationHistory';
+import { createId } from '@/utils/id';
 
 interface Msg {
   id: string;
@@ -68,6 +71,44 @@ export default function AssistantScreen() {
   const [reading, setReading] = useState(false);
   const consultRef = useRef<ConsultationRow[] | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const router = useRouter();
+
+  // Local conversation history (this device only).
+  const textConvId = useRef(createId('conv'));
+  const textStartedAt = useRef(new Date().toISOString());
+  const prevLiveState = useRef(live.state);
+  const voiceStartedAt = useRef<string | null>(null);
+
+  // Persist the typed conversation as it grows (only once there's a real message).
+  useEffect(() => {
+    if (!messages.some((m) => m.who === 'user')) return;
+    void saveConversation({
+      id: textConvId.current,
+      mode: 'text',
+      startedAt: textStartedAt.current,
+      updatedAt: new Date().toISOString(),
+      messages: messages.map((m) => ({ who: m.who, text: m.text, source: m.source })),
+    });
+  }, [messages]);
+
+  // Save the voice-call transcript when a call ends.
+  useEffect(() => {
+    const prev = prevLiveState.current;
+    prevLiveState.current = live.state;
+    if (live.state === 'connecting') voiceStartedAt.current = new Date().toISOString();
+    const callEnded =
+      (prev === 'live' || prev === 'connecting') && (live.state === 'idle' || live.state === 'error');
+    if (callEnded && live.transcript.length > 0) {
+      const now = new Date().toISOString();
+      void saveConversation({
+        id: createId('conv'),
+        mode: 'voice',
+        startedAt: voiceStartedAt.current ?? now,
+        updatedAt: now,
+        messages: live.transcript.map((t) => ({ who: t.who, text: t.text })),
+      });
+    }
+  }, [live.state, live.transcript]);
 
   const firstName = session?.user?.firstName;
   const greeting = useMemo(
@@ -278,21 +319,32 @@ export default function AssistantScreen() {
     >
       <View style={styles.header}>
         <AppText variant="heading">Health Assistant</AppText>
-        <Pressable
-          onPress={mode === 'voice' ? goToText : goToVoice}
-          style={styles.modeSwitch}
-          accessibilityRole="button"
-          accessibilityLabel={mode === 'voice' ? 'Switch to text chat' : 'Switch to voice'}
-        >
-          <Ionicons
-            name={mode === 'voice' ? 'chatbubble-ellipses-outline' : 'mic-outline'}
-            size={18}
-            color={colors.primary}
-          />
-          <AppText variant="label" color="accent">
-            {mode === 'voice' ? 'Type' : 'Talk'}
-          </AppText>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => router.push('/assistant-history')}
+            style={styles.iconBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Conversation history"
+            accessibilityHint="Opens your saved chats and voice transcripts"
+          >
+            <Ionicons name="time-outline" size={20} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            onPress={mode === 'voice' ? goToText : goToVoice}
+            style={styles.modeSwitch}
+            accessibilityRole="button"
+            accessibilityLabel={mode === 'voice' ? 'Switch to text chat' : 'Switch to voice'}
+          >
+            <Ionicons
+              name={mode === 'voice' ? 'chatbubble-ellipses-outline' : 'mic-outline'}
+              size={18}
+              color={colors.primary}
+            />
+            <AppText variant="label" color="accent">
+              {mode === 'voice' ? 'Type' : 'Talk'}
+            </AppText>
+          </Pressable>
+        </View>
       </View>
 
       {mode === 'voice' ? (
@@ -557,6 +609,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+  },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: palette.blue100,
+    backgroundColor: palette.blue50,
   },
   modeSwitch: {
     flexDirection: 'row',

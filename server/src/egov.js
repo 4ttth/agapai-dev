@@ -91,7 +91,24 @@ export async function sendSms(number, message) {
 
 // ---------- Face Liveness ----------
 
-const FACE_BASE = () => env('FACE_LIVENESS_BASE') || 'https://hackathon-face-liveness.e.gov.ph';
+// The REST API lives on the `-api` host (matching eVerify/SSO). The bare
+// `hackathon-face-liveness.e.gov.ph` host serves the liveness *web app* (an
+// SPA), so pointing at it returns HTML instead of JSON.
+const FACE_BASE = () => env('FACE_LIVENESS_BASE') || 'https://hackathon-face-liveness-api.e.gov.ph';
+
+/** Turn an upstream body into a short, safe diagnostic string. */
+function bodySnippet(res) {
+  if (res && typeof res.raw === 'string') {
+    const html = /<!doctype html|<html/i.test(res.raw);
+    return {
+      text: res.raw.slice(0, 140),
+      hint: html
+        ? ' — got an HTML page, so FACE_LIVENESS_BASE is pointing at the liveness web app, not the REST API. Use the -api host.'
+        : '',
+    };
+  }
+  return { text: JSON.stringify(res ?? {}).slice(0, 200), hint: '' };
+}
 
 /**
  * Create an eGov Face Liveness session. Returns { token, url }; the app opens
@@ -107,7 +124,12 @@ export async function createLivenessSession({ action = 'post', callbackUrl, dela
     body: JSON.stringify(body),
   });
   if ((status !== 200 && status !== 201) || !res.token || !res.url) {
-    throw Object.assign(new Error('Face Liveness session creation failed'), { status, body: res });
+    const s = bodySnippet(res);
+    throw Object.assign(new Error(`Face Liveness session creation failed (eGov ${status})${s.hint}`), {
+      status,
+      body: res,
+      snippet: s.text,
+    });
   }
   return { token: res.token, url: res.url };
 }
@@ -121,7 +143,14 @@ export async function getLivenessResult(token) {
   const { status, body } = await jsonFetch(`${FACE_BASE()}/v1/liveness/result/${token}`, {
     headers: { 'x-api-key': env('FACE_LIVENESS_API_KEY') },
   });
-  if (status !== 200) throw Object.assign(new Error('Face Liveness result fetch failed'), { status, body });
+  if (status !== 200) {
+    const s = bodySnippet(body);
+    throw Object.assign(new Error(`Face Liveness result fetch failed (eGov ${status})${s.hint}`), {
+      status,
+      body,
+      snippet: s.text,
+    });
+  }
   const score = Number(body.confidence_score ?? 0);
   const ok = body.status === 'SUCCEEDED' && score >= 95.0;
   return { ok, status: body.status, score, referenceImageUrl: body.reference_image_url ?? null, raw: body };

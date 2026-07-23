@@ -6,6 +6,7 @@ import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MoodGrid } from '@/components/MoodGrid';
+import { MoodPicker } from '@/components/MoodPicker';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
 import { DoseRow, NextDoseCard, useMedications } from '@/features/pill-tracker';
@@ -14,7 +15,7 @@ import { serverApi } from '@/services/api/server';
 import { colors, layout, palette, radii, spacing } from '@/theme';
 import type { ConsultationRow, DoseWithMedication, MoodLevel, MoodMap } from '@/types';
 import { formatDateLabel } from '@/utils/datetime';
-import { MOODS, readMoods, setMood, todayKey } from '@/utils/mood';
+import { readMoods, setMood, todayKey } from '@/utils/mood';
 
 /** Staggered fade-up wrapper for a friendly, modern entrance. */
 function Rise({ index, children }: { index: number; children: ReactNode }) {
@@ -214,21 +215,11 @@ export default function HomeScreen() {
 
           <Rise index={1}>
             <Card>
-              <AppText variant="section">How do you feel today?</AppText>
-              <View style={styles.moodRow}>
-                {MOODS.map((m) => (
-                  <Pressable
-                    key={m.level}
-                    onPress={() => void pickMood(m.level)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Mood: ${m.label}`}
-                    accessibilityState={{ selected: todayMood === m.level }}
-                    style={[styles.moodBtn, todayMood === m.level && { backgroundColor: m.color + '33', borderColor: m.color }]}
-                  >
-                    <AppText style={styles.moodEmoji}>{m.emoji}</AppText>
-                  </Pressable>
-                ))}
-              </View>
+              <AppText variant="section" style={styles.moodTitle}>
+                How do you feel today?
+              </AppText>
+              <MoodPicker value={todayMood} onPick={pickMood} />
+              <View style={styles.moodDivider} />
               <MoodGrid moods={moods} />
             </Card>
           </Rise>
@@ -367,18 +358,8 @@ const styles = StyleSheet.create({
   allDone: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
   doseList: { marginTop: spacing.lg, gap: spacing.md },
   seeAll: { alignSelf: 'flex-end', paddingVertical: spacing.xs, minHeight: 32 },
-  moodRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: spacing.lg },
-  moodBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  moodEmoji: { fontSize: 26 },
+  moodTitle: { marginBottom: spacing.md },
+  moodDivider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.lg },
   consultRow: {
     flexDirection: 'row',
     alignItems: 'center',

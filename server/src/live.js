@@ -114,6 +114,25 @@ async function bridge(client, auth, documentText) {
           systemInstruction: {
             parts: [{ text: VOICE_PROMPT + persona + documentLines(documentText) }],
           },
+          // Make voice-activity detection deliberately hard to trigger so that
+          // background/environmental sounds don't get mistaken for the patient
+          // interrupting — that false barge-in was cutting the assistant off
+          // mid-sentence. LOW start sensitivity needs clearer speech to begin a
+          // turn; a longer end-silence keeps it from ending the user's turn on a
+          // brief noise; both also cut the "doubling" from spurious interrupts.
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+              endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+              prefixPaddingMs: 300,
+              silenceDurationMs: 1200,
+            },
+          },
+          // Live transcription of both sides, so the phone can keep a local
+          // text transcript of the voice conversation.
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         },
       }),
     );

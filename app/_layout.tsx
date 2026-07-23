@@ -92,6 +92,7 @@ function RootNavigator() {
       <Stack.Screen name="scan" options={{ title: 'Scan Health ID', presentation: 'modal' }} />
       <Stack.Screen name="health-id" options={{ title: 'My Health ID', presentation: 'modal' }} />
       <Stack.Screen name="assistant" options={{ title: 'AI Health Assistant' }} />
+      <Stack.Screen name="assistant-history" options={{ title: 'Conversation history' }} />
       <Stack.Screen name="consultation/[id]" options={{ title: 'Consultation record' }} />
       <Stack.Screen name="scan-document" options={{ title: 'Scan document', presentation: 'modal' }} />
       <Stack.Screen name="verify-identity" options={{ title: 'Verify your identity', presentation: 'modal' }} />
