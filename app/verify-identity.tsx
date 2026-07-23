@@ -6,10 +6,10 @@ import { StyleSheet, View } from 'react-native';
 import { QrScanner } from '@/components/qr';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
+import { FaceLivenessModal } from '@/components/FaceLivenessModal';
 import { useAuth } from '@/hooks/useAuth';
 import { serverApi } from '@/services/api/server';
 import { colors, radii, spacing } from '@/theme';
-import { runFaceLiveness } from '@/utils/liveness';
 
 type Phase = 'intro' | 'scanning' | 'verifying' | 'done' | 'failed';
 
@@ -24,6 +24,7 @@ export default function VerifyIdentityScreen() {
   const [phase, setPhase] = useState<Phase>('intro');
   const [message, setMessage] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
+  const [livenessOpen, setLivenessOpen] = useState(false);
 
   const onScanned = useCallback(
     async (value: string) => {
@@ -42,25 +43,24 @@ export default function VerifyIdentityScreen() {
     [updateUser],
   );
 
-  const onFaceLiveness = useCallback(async () => {
-    const live = await runFaceLiveness('edit-unlock');
-    if (!live.ok) {
-      if (live.reason === 'cancelled') return;
-      setMessage(live.message ?? 'Face Liveness could not start.');
-      return setPhase('failed');
-    }
-    setPhase('verifying');
-    try {
-      const result = await serverApi.livenessUnlock(live.token);
-      setScore(result.score);
-      const { user } = await serverApi.me();
-      await updateUser(user);
-      setPhase('done');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Face Liveness verification failed.');
-      setPhase('failed');
-    }
-  }, [updateUser]);
+  const onLivenessResult = useCallback(
+    async (token: string | null) => {
+      setLivenessOpen(false);
+      if (!token) return; // cancelled
+      setPhase('verifying');
+      try {
+        const result = await serverApi.livenessUnlock(token);
+        setScore(result.score);
+        const { user } = await serverApi.me();
+        await updateUser(user);
+        setPhase('done');
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : 'Face Liveness verification failed.');
+        setPhase('failed');
+      }
+    },
+    [updateUser],
+  );
 
   return (
     <View style={styles.root}>
@@ -88,7 +88,7 @@ export default function VerifyIdentityScreen() {
             label="Verify with Face Liveness"
             variant="secondary"
             icon={<Ionicons name="happy" size={22} color={colors.primary} />}
-            onPress={() => void onFaceLiveness()}
+            onPress={() => setLivenessOpen(true)}
           />
           <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
         </View>
@@ -131,6 +131,12 @@ export default function VerifyIdentityScreen() {
           <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
         </View>
       )}
+
+      <FaceLivenessModal
+        visible={livenessOpen}
+        purpose="edit-unlock"
+        onResult={(token) => void onLivenessResult(token)}
+      />
     </View>
   );
 }

@@ -181,15 +181,15 @@ the server holds in the clear.
 
 ```mermaid
 sequenceDiagram
-    participant Ph as 📱 Patient phone
-    participant Dr as 🩻 Doctor phone
-    participant Sv as ⚙️ Server
+    participant Ph as Patient phone
+    participant Dr as Doctor phone
+    participant Sv as Server
     Ph->>Ph: Generate random 256-bit key at registration
-    Ph->>Sv: Escrow key (wrapped; released only via Face Liveness)
-    Note over Ph,Dr: Health ID QR carries the key — shown in person
+    Ph->>Sv: Escrow key, released only via Face Liveness
+    Note over Ph,Dr: Health ID QR carries the key, shown in person
     Dr->>Dr: AES-256 encrypt the consultation on-device
     Dr->>Sv: Upload ciphertext only
-    Sv-->>Ph: Ciphertext (server can never read it)
+    Sv-->>Ph: Ciphertext, which the server cannot read
     Ph->>Ph: Decrypt locally with the patient key
 ```
 
