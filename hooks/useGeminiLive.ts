@@ -27,6 +27,12 @@ const BUFFER_LENGTH = 2048;
 
 export type LiveState = 'idle' | 'connecting' | 'live' | 'error';
 
+/** One spoken turn, transcribed by Gemini Live (kept locally for history). */
+export interface LiveTurn {
+  who: 'user' | 'ai';
+  text: string;
+}
+
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 /** RN has no reliable btoa/Buffer, so encode the PCM frames by hand. */
@@ -59,6 +65,12 @@ export function useGeminiLive() {
   const [state, setState] = useState<LiveState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [transcript, setTranscript] = useState<LiveTurn[]>([]);
+
+  // Transcription arrives as incremental fragments per side; buffer them and
+  // flush a complete turn at each boundary (user→assistant, or turnComplete).
+  const userBufRef = useRef('');
+  const aiBufRef = useRef('');
 
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -90,11 +102,26 @@ export function useGeminiLive() {
     setSpeaking(false);
   }, []);
 
+  const flushUser = useCallback(() => {
+    const t = userBufRef.current.trim();
+    userBufRef.current = '';
+    if (t) setTranscript((prev) => [...prev, { who: 'user', text: t }]);
+  }, []);
+
+  const flushAi = useCallback(() => {
+    const t = aiBufRef.current.trim();
+    aiBufRef.current = '';
+    if (t) setTranscript((prev) => [...prev, { who: 'ai', text: t }]);
+  }, []);
+
   const stop = useCallback(() => {
     stoppingRef.current = true;
+    // Persist any half-finished turn before the socket goes away.
+    flushUser();
+    flushAi();
     teardown();
     setState('idle');
-  }, [teardown]);
+  }, [teardown, flushUser, flushAi]);
 
   const start = useCallback(
     async (documentText?: string) => {
@@ -102,6 +129,9 @@ export function useGeminiLive() {
       stoppingRef.current = false;
       setError(null);
       setState('connecting');
+      setTranscript([]);
+      userBufRef.current = '';
+      aiBufRef.current = '';
 
       try {
         const permission = await AudioManager.requestRecordingPermissions();
@@ -165,6 +195,20 @@ export function useGeminiLive() {
             return;
           }
 
+          // Live transcription of both sides (for the local history transcript).
+          const userText = msg.serverContent?.inputTranscription?.text;
+          if (typeof userText === 'string' && userText) {
+            // A new user utterance means the previous AI turn is complete.
+            if (aiBufRef.current.trim()) flushAi();
+            userBufRef.current += userText;
+          }
+          const aiText = msg.serverContent?.outputTranscription?.text;
+          if (typeof aiText === 'string' && aiText) {
+            // The assistant is answering, so the user's turn is complete.
+            if (userBufRef.current.trim()) flushUser();
+            aiBufRef.current += aiText;
+          }
+
           // Barge-in: drop anything still queued so the reply stops promptly.
           if (msg.serverContent?.interrupted) {
             queueRef.current?.clearBuffers();
@@ -192,7 +236,10 @@ export function useGeminiLive() {
               // A single corrupt chunk shouldn't end the call.
             }
           }
-          if (msg.serverContent?.turnComplete) setSpeaking(false);
+          if (msg.serverContent?.turnComplete) {
+            setSpeaking(false);
+            flushAi(); // the assistant's turn is done — commit it to the transcript
+          }
         };
 
         ws.onerror = () => {
@@ -204,6 +251,9 @@ export function useGeminiLive() {
 
         ws.onclose = () => {
           if (stoppingRef.current) return;
+          // Server/network closed the call — keep whatever was transcribed.
+          flushUser();
+          flushAi();
           teardown();
           setState((s) => (s === 'error' ? s : 'idle'));
         };
@@ -213,7 +263,7 @@ export function useGeminiLive() {
         teardown();
       }
     },
-    [state, teardown],
+    [state, teardown, flushUser, flushAi],
   );
 
   /** Stream mic frames upstream once Gemini has acknowledged setup. */
@@ -253,5 +303,5 @@ export function useGeminiLive() {
   // Never leave the mic hot if the screen goes away mid-call.
   useEffect(() => () => teardown(), [teardown]);
 
-  return { state, error, speaking, start, stop };
+  return { state, error, speaking, transcript, start, stop };
 }
