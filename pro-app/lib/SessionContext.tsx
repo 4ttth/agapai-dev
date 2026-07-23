@@ -34,7 +34,7 @@ interface Ctx {
   pending: { identity: VerifiedIdentity; ticket: string } | null;
   /** Real eGov verification: sign in by scanning the National ID QR. */
   signIn: (qrValue: string) => Promise<void>;
-  registerPro: (role: Role) => Promise<void>;
+  registerPro: (role: Role, livenessToken: string) => Promise<void>;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -81,10 +81,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const registerPro = useCallback(
-    async (role: Role) => {
+    async (role: Role, livenessToken: string) => {
       if (!pending) throw new Error('Scan your National ID first.');
       const { user, token } = await api<{ user: ProUser; token: string }>('/auth/register', {
-        body: { role, ticket: pending.ticket },
+        body: { role, ticket: pending.ticket, livenessToken },
       });
       const s = { token, user };
       await saveSession(s);
