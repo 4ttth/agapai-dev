@@ -17,18 +17,100 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '30mb' }));
 
-// Request metrics (fire-and-forget) for the admin dashboard.
+// Headers that carry secrets — redact their values before storing.
+const REDACTED_HEADERS = new Set([
+  'authorization',
+  'x-admin-key',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'proxy-authorization',
+]);
+
+/** Sanitize a headers object: redact sensitive keys, drop noise. */
+function sanitizeHeaders(raw = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const key = k.toLowerCase();
+    if (key === 'host' || key === 'content-length' || key === 'accept-encoding') continue;
+    out[key] = REDACTED_HEADERS.has(key) ? '[REDACTED]' : v;
+  }
+  return out;
+}
+
+/** Truncate a JSON string to maxBytes UTF-8 bytes. */
+function truncate(str, maxBytes = 10240) {
+  if (!str || str.length <= maxBytes) return str;
+  return str.slice(0, maxBytes) + '…[truncated]';
+}
+
+/**
+ * Intercept res.json() so we can capture the response body before it's sent.
+ * We only capture for /api routes; the original method is always called.
+ */
+function captureResJson(res) {
+  const original = res.json.bind(res);
+  let captured = '{}';
+  res.json = (body) => {
+    try {
+      captured = truncate(JSON.stringify(body));
+    } catch {
+      captured = '{}';
+    }
+    return original(body);
+  };
+  return () => captured;
+}
+
+// Request metrics + verbose request log (fire-and-forget) for the admin dashboard.
 app.use((req, res, next) => {
   const started = Date.now();
-  const path = req.path; // capture before the router strips the mount prefix
+  const reqPath = req.path; // capture before the router strips the mount prefix
+  const fullPath = req.originalUrl;
+
+  // Only instrument /api routes (skip static files, etc.)
+  if (!reqPath.startsWith('/api')) return next();
+
+  const getResBody = captureResJson(res);
+
   res.on('finish', () => {
-    if (!path.startsWith('/api') || path.startsWith('/api/admin')) return;
-    prisma.metric
-      .create({
-        data: { route: path, method: req.method, status: res.statusCode, ms: Date.now() - started },
-      })
-      .catch(() => {});
+    const ms = Date.now() - started;
+    const status = res.statusCode;
+
+    // Lightweight metric (existing — skip admin routes to avoid noise)
+    if (!reqPath.startsWith('/api/admin')) {
+      prisma.metric
+        .create({ data: { route: reqPath, method: req.method, status, ms } })
+        .catch(() => {});
+    }
+
+    // Verbose request log — capture everything, stored fire-and-forget.
+    try {
+      const reqHeaders = truncate(JSON.stringify(sanitizeHeaders(req.headers)));
+      const reqBody = truncate(JSON.stringify(req.body ?? {}));
+      const resBody = getResBody();
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null);
+
+      prisma.requestLog
+        .create({
+          data: {
+            method: req.method,
+            route: reqPath,
+            fullPath,
+            status,
+            ms,
+            reqHeaders: reqHeaders ?? '{}',
+            reqBody: reqBody ?? '{}',
+            resBody: resBody ?? '{}',
+            ip: typeof ip === 'string' ? ip.split(',')[0].trim() : null,
+          },
+        })
+        .catch(() => {});
+    } catch {
+      // Never let logging crash the server.
+    }
   });
+
   next();
 });
 

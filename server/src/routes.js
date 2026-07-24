@@ -1592,6 +1592,66 @@ api.get(
   }),
 );
 
+/**
+ * Paginated verbose request log for the admin dashboard.
+ * Supports filtering by method, status class (2xx/4xx/5xx), and a route search.
+ * Returns at most 50 rows per page; rows are pruned after 7 days by cron.
+ */
+api.get(
+  '/admin/request-logs',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const page     = Math.max(1, Number(req.query.page)     || 1);
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20));
+    const method   = String(req.query.method || '').toUpperCase();
+    const route    = String(req.query.route  || '').trim();
+    const statusClass = String(req.query.statusClass || '').trim(); // '2xx' | '4xx' | '5xx'
+
+    const where = {
+      ...(method && ['GET','POST','PUT','PATCH','DELETE'].includes(method) ? { method } : {}),
+      ...(route ? { route: { contains: route, mode: 'insensitive' } } : {}),
+      ...(statusClass === '2xx' ? { status: { gte: 200, lt: 300 } } :
+          statusClass === '3xx' ? { status: { gte: 300, lt: 400 } } :
+          statusClass === '4xx' ? { status: { gte: 400, lt: 500 } } :
+          statusClass === '5xx' ? { status: { gte: 500, lt: 600 } } : {}),
+    };
+
+    const [total, logs] = await Promise.all([
+      prisma.requestLog.count({ where }),
+      prisma.requestLog.findMany({
+        where,
+        orderBy: { at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        // Don't send heavy body fields in the list view — load them on demand.
+        select: {
+          id: true, method: true, route: true, fullPath: true,
+          status: true, ms: true, ip: true, at: true,
+        },
+      }),
+    ]);
+
+    res.json({
+      logs,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }),
+);
+
+/** Single request-log detail (includes full headers + bodies). */
+api.get(
+  '/admin/request-logs/:id',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const log = await prisma.requestLog.findUnique({ where: { id: req.params.id } });
+    if (!log) return res.status(404).json({ error: 'Log entry not found.' });
+    res.json({ log });
+  }),
+);
+
 api.post(
   '/admin/test-sms',
   requireAdmin,

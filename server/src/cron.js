@@ -98,11 +98,25 @@ export async function purgeExpiredFollowUps() {
   if (count > 0) console.log(`[follow-up] purged ${count} expired thread(s)`);
 }
 
+/**
+ * Prune request logs older than 7 days so the table stays lean.
+ * Runs nightly alongside follow-up cleanup.
+ */
+export async function pruneRequestLogs() {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.requestLog.deleteMany({ where: { at: { lt: cutoff } } });
+  if (count > 0) console.log(`[request-log] pruned ${count} old log(s)`);
+}
+
 export function startCron() {
   cron.schedule('*/5 * * * *', () => runSmsSweep().catch((e) => console.error('[sms] sweep error', e)));
   cron.schedule('7 * * * *', () =>
     purgeExpiredFollowUps().catch((e) => console.error('[follow-up] purge error', e)),
   );
+  cron.schedule('17 3 * * *', () =>
+    pruneRequestLogs().catch((e) => console.error('[request-log] prune error', e)),
+  );
   console.log('[cron] SMS reminder sweep scheduled every 5 minutes');
   console.log('[cron] follow-up retention purge scheduled hourly');
+  console.log('[cron] request-log prune scheduled nightly at 03:17');
 }

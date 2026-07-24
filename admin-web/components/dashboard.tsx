@@ -8,6 +8,7 @@ import { clearAdminKey, swrFetcher, type Overview } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Charts } from '@/components/charts';
 import { PendingTable } from '@/components/pending-table';
+import { RequestLogs } from '@/components/request-logs';
 import { ServiceHealth } from '@/components/service-health';
 import { StatCards } from '@/components/stat-cards';
 import { UsersTable } from '@/components/users-table';
@@ -68,6 +69,7 @@ export function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <ServiceHealth data={data} />
         <PendingTable />
         <UsersTable />
+        <RequestLogs />
       </main>
     </div>
   );
