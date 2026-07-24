@@ -7,12 +7,15 @@ import {
   type ReactNode,
 } from 'react';
 
+import { doseId } from '@/features/pill-tracker/logic';
 import { services } from '@/services';
 import type { AsyncStatus, DoseLog, Medication, NewMedicationInput } from '@/types';
-import { todayString } from '@/utils/datetime';
+import { todayString, toDateString } from '@/utils/datetime';
+import { getDeviceId } from '@/utils/device';
 import { readNotificationPrefs } from '@/utils/notificationPrefs';
 import { reconcileNotifications, requestNotificationPermission } from '@/utils/notifications';
 import { setHapticsEnabled } from '@/utils/haptics';
+import { initLiveActivities, teardownLiveActivities } from '@/utils/liveActivities';
 
 interface MedicationContextValue {
   status: AsyncStatus;
@@ -125,6 +128,39 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
     });
     await services.medication.saveDoseLog(dose);
   }, []);
+
+  /**
+   * Mark a dose taken from a medication Live Activity ("I already took it").
+   * Rebuilds the deterministic dose id from the scheduled time (local day + HH:mm)
+   * so it overlays the correct materialized dose in the tracker.
+   */
+  const recordDoseTaken = useCallback(
+    (medicationId: string, scheduledAtISO: string) => {
+      const d = new Date(scheduledAtISO);
+      if (Number.isNaN(d.getTime())) return;
+      const day = toDateString(d);
+      const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      void recordDose({
+        id: doseId(medicationId, day, time),
+        medicationId,
+        scheduledAt: scheduledAtISO,
+        status: 'taken',
+        takenAt: new Date().toISOString(),
+      });
+    },
+    [recordDose],
+  );
+
+  // Wire the iOS medication Live Activity: share auth config with the widget,
+  // register APNs tokens, and reconcile doses confirmed from the activity.
+  // No-op where the native module is absent (Expo Go, Android, web).
+  useEffect(() => {
+    void (async () => {
+      const deviceId = await getDeviceId();
+      await initLiveActivities(deviceId, recordDoseTaken);
+    })();
+    return () => teardownLiveActivities();
+  }, [recordDoseTaken]);
 
   const value = useMemo<MedicationContextValue>(
     () => ({

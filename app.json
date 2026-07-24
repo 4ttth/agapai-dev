@@ -92,7 +92,9 @@
         }
       ],
       "expo-audio",
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      "@bacons/apple-targets",
+      "./plugins/withAgapaiLiveActivity"
     ],
     "experiments": {
       "typedRoutes": true

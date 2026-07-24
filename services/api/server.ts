@@ -201,6 +201,28 @@ export const serverApi = {
     return api<{ ok: boolean }>('/keys/push-token', { body: { pushToken, platform } });
   },
 
+  // ---------- Medication Live Activities (iOS) ----------
+
+  /** Register the ActivityKit push-to-start token so the server can start a
+   *  medication Live Activity via APNs even when the app is closed. */
+  registerLiveActivityToken(pushToStartToken: string) {
+    return api<{ ok: boolean }>('/live-activity/token', { body: { pushToStartToken } });
+  },
+
+  /** Register a running activity's update token so the server can push it to the
+   *  "due" state at the exact dose time. */
+  registerLiveActivityUpdateToken(medicationId: string, updateToken: string) {
+    return api<{ ok: boolean }>('/live-activity/activity-token', {
+      body: { medicationId, updateToken },
+    });
+  },
+
+  /** Note a dose taken from a Live Activity button (server marks it dispensed-
+   *  free "taken" for reminder logic). Mirrors the widget's App Intent call. */
+  markLiveActivityTaken(medicationId: string, scheduledAt: string) {
+    return api<{ ok: boolean }>('/live-activity/taken', { body: { medicationId, scheduledAt } });
+  },
+
   /** Ring the other participant for a call (push + live). */
   ringFollowUpCall(id: string) {
     return api<{ ok: boolean; callId: string; rang: boolean }>(`/follow-up/threads/${id}/call`, { body: {} });
