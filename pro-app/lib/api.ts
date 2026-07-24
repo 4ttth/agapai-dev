@@ -95,7 +95,7 @@ export async function api<T>(
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
     if (!res.ok) {
       const msg = data.error ?? `Request failed (${res.status})`;
-      if (res.status === 401 || msg.includes('logged out') || msg.includes('no account found')) {
+      if (msg.includes('logged out') || msg.includes('no account found')) {
         if (unauthorizedListener) {
           unauthorizedListener(msg);
         }

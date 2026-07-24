@@ -53,7 +53,7 @@ export async function api<T>(
     if (!res.ok) {
       const msg =
         (data as { error?: string })?.error ?? `Request failed (${res.status}). Please try again.`;
-      if (res.status === 401 || msg.includes('logged out') || msg.includes('no account found')) {
+      if (msg.includes('logged out') || msg.includes('no account found')) {
         if (unauthorizedListener) {
           unauthorizedListener(msg);
         }

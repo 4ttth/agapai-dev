@@ -34,7 +34,7 @@ export async function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
     const data = verifyToken(header.replace(/^Bearer /, ''));
-    if (!data) return res.status(401).json({ error: 'Unauthorized' });
+    if (!data) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
 
     const user = await prisma.user.findUnique({ where: { id: data.id } }).catch(() => null);
     if (!user) {
