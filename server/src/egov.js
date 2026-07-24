@@ -196,7 +196,8 @@ export async function getLivenessResult(token) {
     });
   }
   const score = Number(body.confidence_score ?? 0);
-  const ok = body.status === 'SUCCEEDED' && score >= 95.0;
+  const threshold = Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
+  const ok = body.status === 'SUCCEEDED' && score >= threshold;
   return { ok, status: body.status, score, referenceImageUrl: body.reference_image_url ?? null, raw: body };
 }
 
