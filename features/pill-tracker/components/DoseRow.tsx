@@ -39,7 +39,7 @@ export function DoseRow({ item, status, onMarkTaken, onUndo, onOpen }: DoseRowPr
       accessibilityHint="Opens medicine details"
     >
       <View style={styles.header}>
-        <PillAvatar appearance={medication.appearance} />
+        <PillAvatar medication={medication} />
         <View style={styles.info}>
           <AppText variant="bodyStrong">{medication.name}</AppText>
           <AppText variant="body" color="secondary">

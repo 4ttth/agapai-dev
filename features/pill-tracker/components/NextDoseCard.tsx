@@ -36,7 +36,7 @@ export function NextDoseCard({ item, overdue, onMarkTaken }: NextDoseCardProps) 
       </View>
 
       <View style={styles.body}>
-        <PillAvatar appearance={medication.appearance} size={64} />
+        <PillAvatar medication={medication} size={64} />
         <View style={styles.info}>
           <AppText variant="heading" color="inverse">
             {medication.name}

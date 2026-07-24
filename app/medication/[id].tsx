@@ -92,7 +92,7 @@ export default function MedicationDetailScreen() {
 
       <Card>
         <View style={styles.identity}>
-          <PillAvatar appearance={medication.appearance} size={72} />
+          <PillAvatar medication={medication} size={72} />
           <View style={styles.flex}>
             <AppText variant="heading">{medication.name}</AppText>
             <AppText variant="body" color="secondary">

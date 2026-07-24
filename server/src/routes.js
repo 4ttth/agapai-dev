@@ -16,7 +16,8 @@ import {
 } from './egov.js';
 import { encryptPii, unwrapKey, wrapKey } from './crypto.js';
 import { buildPiiRecord } from './pii.js';
-import { askGemini, geminiEnabled } from './gemini.js';
+import { askGemini, geminiEnabled, synthesizeSpeech } from './gemini.js';
+import { resolveCategory, warmCategory } from './medCategory.js';
 import {
   buildHealthReply,
   genericHealthReply,
@@ -319,6 +320,41 @@ api.post(
           }). Please try the liveness test again.`,
           liveness: live,
         });
+
+      // Anti-spoof liveness only proves *a* live person is present — not that
+      // it is the person whose National ID was just scanned. Bind the live face
+      // to the eVerify identity so a DIFFERENT live person can't register (or
+      // re-register) against someone else's identity. Without this, the pro app
+      // "passed" for any face as long as one valid ID had been scanned.
+      if (identityMatchEnabled() && identity) {
+        if (!firstName || !lastName || !identity.birthDate) {
+          return res.status(422).json({
+            error: 'Verified identity is incomplete, so the Face Liveness match cannot be confirmed.',
+          });
+        }
+        let match;
+        try {
+          match = await everifyQuery({
+            firstName,
+            lastName,
+            middleName: identity.middleName,
+            suffix: identity.suffix,
+            birthDate: identity.birthDate,
+            faceLivenessSessionId: b.livenessToken,
+          });
+        } catch (err) {
+          console.error('[register] identity match failed:', err.status, err.message);
+          return res.status(502).json({
+            error: 'Could not confirm your identity with eVerify. Please try the Face Liveness test again.',
+          });
+        }
+        if (!match.matched) {
+          console.warn(`[register] live face did not match scanned National ID (${role})`);
+          return res.status(403).json({
+            error: 'The live face does not match the National ID that was scanned. Registration must be completed by the ID holder.',
+          });
+        }
+      }
       liveVerified = true;
     }
 
@@ -636,6 +672,44 @@ api.post(
 );
 
 /**
+ * Neural text-to-speech via Gemini. Returns base64 PCM (24 kHz) the app plays
+ * so the assistant sounds human, instead of the device's robotic voice. The
+ * key stays server-side. 503 tells the client to fall back to on-device speech.
+ */
+api.post(
+  '/ai/tts',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { text, voice } = req.body || {};
+    if (!text || !String(text).trim()) return res.status(422).json({ error: 'text required' });
+    if (!geminiEnabled()) return res.status(503).json({ error: 'Gemini TTS is not configured on the server.' });
+    try {
+      const out = await synthesizeSpeech(text, { voice });
+      return res.json(out);
+    } catch (err) {
+      console.error('[tts] failed:', err.status, err.message);
+      return res.status(502).json({ error: 'Could not generate speech right now.' });
+    }
+  }),
+);
+
+/**
+ * Classify a medicine name into one of the fixed visual categories so the app
+ * can show a matching icon. Cached per normalized name (see medCategory.js), so
+ * the same medicine is only ever sent to the AI once.
+ */
+api.get(
+  '/ai/medication-category',
+  requireAuth,
+  wrap(async (req, res) => {
+    const name = String(req.query.name || '').trim();
+    if (!name) return res.status(422).json({ error: 'name required' });
+    const { category, source } = await resolveCategory(name);
+    res.json({ name, category, source });
+  }),
+);
+
+/**
  * Document text extraction via eGov AI. The patient photographs a lab result,
  * prescription or clinic form on their own phone; we OCR it upstream and hand
  * the text back so it can be fed to the assistant for interpretation.
@@ -712,6 +786,9 @@ api.post(
             }),
           ),
       );
+      // Warm the icon-category cache in the background so the patient's list
+      // shows an AI-classified icon without a first-open delay.
+      medications.forEach((m) => warmCategory(m.name));
     }
     // Post-consultation notification (patient-toggleable; delivered by SMS so it
     // arrives even when the app is closed).
@@ -796,6 +873,7 @@ api.post(
         }),
       );
     }
+    created.forEach((m) => warmCategory(m.name));
     if (consultationId) {
       await prisma.consultation
         .update({ where: { id: consultationId }, data: { dispensedAt: new Date() } })
@@ -826,7 +904,17 @@ api.get(
       where: { patientId: req.auth.id, active: true },
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ medications: list.map((m) => ({ ...m, times: JSON.parse(m.times || '[]') })) });
+    // Attach a visual category per medicine. cacheOnly keeps this list fast: it
+    // reads the cache (warmed when the med was prescribed/dispensed) or a
+    // keyword guess, never a blocking AI call.
+    const medications = await Promise.all(
+      list.map(async (m) => ({
+        ...m,
+        times: JSON.parse(m.times || '[]'),
+        category: (await resolveCategory(m.name, { cacheOnly: true })).category,
+      })),
+    );
+    res.json({ medications });
   }),
 );
 

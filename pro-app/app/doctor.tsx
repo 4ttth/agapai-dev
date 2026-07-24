@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -36,7 +36,9 @@ export default function DoctorHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!user) return null;
+  // After signing out the session is cleared; send the user back to login
+  // instead of rendering nothing (which left the app stuck on a white screen).
+  if (!user) return <Redirect href="/login" />;
 
   return (
     <ScrollView

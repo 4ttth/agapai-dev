@@ -108,6 +108,29 @@ export const serverApi = {
   },
 
   /**
+   * Neural text-to-speech via Gemini (relayed by the server so the key stays
+   * server-side). Returns base64 signed-16-bit PCM plus its sample rate, which
+   * the client decodes and plays. Falls back to the device voice on failure.
+   */
+  synthesizeSpeech(text: string, voice?: string) {
+    return api<{ audio: string; mimeType: string; rate: number }>('/ai/tts', {
+      body: { text, voice },
+      timeoutMs: 30000,
+    });
+  },
+
+  /**
+   * Classify a medicine name into a small, fixed set of visual categories
+   * (pill, capsule, liquid, inhaler, injection, drops, cream, other) so the UI
+   * can show a matching icon. Cached server-side per normalized name.
+   */
+  medicationCategory(name: string) {
+    return api<{ name: string; category: string; source: string }>(
+      `/ai/medication-category?name=${encodeURIComponent(name)}`,
+    );
+  },
+
+  /**
    * Run a photo of a document (lab result, prescription, clinic form) through
    * eGov AI's extractor. The returned text can be passed back to askAssistant
    * as documentText so the AI can interpret it.
@@ -133,6 +156,7 @@ export const serverApi = {
         times: string[];
         quantity?: number | null;
         source: 'SELF' | 'DOCTOR' | 'PHARMACIST';
+        category?: import('@/types').MedicationCategory;
         createdAt: string;
       }>;
     }>('/medications');

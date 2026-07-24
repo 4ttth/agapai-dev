@@ -166,3 +166,19 @@ model Metric {
   ms     Int
   at     DateTime @default(now())
 }
+
+/**
+ * Cache of medicine name → visual category (pill, capsule, liquid, inhaler,
+ * injection, drops, cream, other). Populated by the AI classifier (Gemini
+ * Structured Output) or the keyword heuristic, keyed by the normalized name so
+ * a medicine is classified once and reused for every user thereafter — no
+ * repeat AI calls for names already seen.
+ */
+model MedicationCategory {
+  name        String   @id
+  displayName String
+  category    String
+  source      String   @default("gemini")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

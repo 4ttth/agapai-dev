@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Image, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
@@ -23,7 +23,7 @@ const FEATURES = [
  */
 export default function LoginScreen() {
   const router = useRouter();
-  const { error, status } = useAuth();
+  const { error } = useAuth();
   const fade = useRef(new Animated.Value(0)).current;
   const rise = useRef(new Animated.Value(24)).current;
 
@@ -32,11 +32,10 @@ export default function LoginScreen() {
       Animated.timing(fade, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(rise, { toValue: 0, useNativeDriver: true, damping: 14 }),
     ]).start();
+    // Navigation to registration/tabs is handled centrally by the route guard
+    // in app/_layout.tsx, so this screen never pushes routes itself (which used
+    // to double up with the guard and stack an extra modal on iOS).
   }, [fade, rise]);
-
-  useEffect(() => {
-    if (status === 'registering') router.push('/(auth)/register');
-  }, [status, router]);
 
   return (
     <Screen edgeToEdge contentContainerStyle={styles.container}>

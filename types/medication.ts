@@ -1,5 +1,19 @@
 import type { ISODateString, ISODateTimeString } from './common';
 
+/**
+ * The strict, closed set of visual medicine categories — small on purpose so
+ * each maps to exactly one icon. Mirrors the server's MEDICATION_CATEGORIES.
+ */
+export type MedicationCategory =
+  | 'pill'
+  | 'capsule'
+  | 'liquid'
+  | 'inhaler'
+  | 'injection'
+  | 'drops'
+  | 'cream'
+  | 'other';
+
 /** Visual attributes that help patients identify a physical pill. */
 export interface PillAppearance {
   /** Human-readable color, e.g. "White". */
@@ -9,6 +23,8 @@ export interface PillAppearance {
   shape: 'round' | 'oval' | 'capsule' | 'oblong' | 'other';
   /** Optional photo of the actual pill/packaging. */
   imageUri?: string;
+  /** Icon category (AI-classified or keyword-derived) for the medicine glyph. */
+  category?: MedicationCategory;
 }
 
 export type MedicationForm = 'tablet' | 'capsule' | 'liquid' | 'injection' | 'drops' | 'other';

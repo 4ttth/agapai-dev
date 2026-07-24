@@ -73,10 +73,17 @@ function useProtectedRoute() {
 
   useEffect(() => {
     if (status === 'initializing') return;
-    const inAuthGroup = segments[0] === '(auth)';
+    const seg = segments as string[];
+    const inAuthGroup = seg[0] === '(auth)';
+    const onRegister = inAuthGroup && seg[1] === 'register';
     if (status === 'signedOut' && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (status === 'registering' && !inAuthGroup) {
+    } else if (status === 'registering' && !onRegister) {
+      // Use replace (not push) so the scan-id modal is swapped out rather than
+      // stacked under the registration screen. Stacking left the scan modal
+      // mounted beneath it, which on iOS showed up as a second, duplicated
+      // modal after registration. This guard is the single source of truth for
+      // the registration hop — the login screen no longer navigates itself.
       router.replace('/(auth)/register');
     } else if (status === 'signedIn' && inAuthGroup) {
       router.replace('/(tabs)');

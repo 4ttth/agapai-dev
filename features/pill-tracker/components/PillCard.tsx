@@ -31,7 +31,7 @@ export function PillCard({ medication, onPress }: PillCardProps) {
       accessibilityHint="Opens medicine details"
     >
       <View style={styles.row}>
-        <PillAvatar appearance={medication.appearance} />
+        <PillAvatar medication={medication} />
         <View style={styles.info}>
           <AppText variant="bodyStrong">{medication.name}</AppText>
           <AppText variant="body" color="secondary">
