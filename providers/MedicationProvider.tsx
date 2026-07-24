@@ -12,6 +12,7 @@ import type { AsyncStatus, DoseLog, Medication, NewMedicationInput } from '@/typ
 import { todayString } from '@/utils/datetime';
 import { readNotificationPrefs } from '@/utils/notificationPrefs';
 import { reconcileNotifications, requestNotificationPermission } from '@/utils/notifications';
+import { setHapticsEnabled } from '@/utils/haptics';
 
 interface MedicationContextValue {
   status: AsyncStatus;
@@ -54,8 +55,11 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
       setDoseLogs(logs);
       setStatus('success');
       // Align local notifications (medication + mood reminders) with the saved
-      // list and preferences on every load.
-      void readNotificationPrefs().then((prefs) => reconcileNotifications(meds, prefs));
+      // list and preferences on every load, and sync the haptics switch.
+      void readNotificationPrefs().then((prefs) => {
+        setHapticsEnabled(prefs.haptics);
+        return reconcileNotifications(meds, prefs);
+      });
     } catch {
       setStatus('error');
       setError('We could not load your medicines. Please try again.');

@@ -17,6 +17,7 @@ import {
   type NotificationPrefs,
 } from '@/utils/notificationPrefs';
 import { reconcileNotifications, requestNotificationPermission } from '@/utils/notifications';
+import { setHapticsEnabled, signatureBuzz, success as hapticSuccess } from '@/utils/haptics';
 
 /** Round a "HH:MM" time by a signed number of minutes, wrapping within a day. */
 function shiftTime(time: string, deltaMinutes: number): string {
@@ -86,6 +87,16 @@ export default function NotificationsScreen() {
     const next = await updateNotificationPrefs(patch);
     setPrefs(next);
 
+    // Keep the haptics engine's in-memory switch in step with the saved pref,
+    // then let the patient *feel* the change: the AgapAI signature when turning
+    // haptics on, a success tick for any other toggle.
+    if (patch.haptics !== undefined) {
+      setHapticsEnabled(next.haptics);
+      if (next.haptics) signatureBuzz();
+    } else {
+      hapticSuccess();
+    }
+
     // Ask for permission the first time a local reminder is switched on.
     if ((patch.moodReminder === true || patch.medications === true) && Platform.OS !== 'web') {
       await requestNotificationPermission();
@@ -141,6 +152,14 @@ export default function NotificationsScreen() {
           subtitle="Before each medication time on this phone"
           value={prefs.medications}
           onValueChange={(v) => void apply({ medications: v })}
+        />
+        <View style={styles.divider} />
+        <ToggleRow
+          icon="pulse"
+          title="Vibration & haptics"
+          subtitle="Feel the AgapAI signature buzz on taps and alerts"
+          value={prefs.haptics}
+          onValueChange={(v) => void apply({ haptics: v })}
         />
         <View style={styles.divider} />
         <ToggleRow

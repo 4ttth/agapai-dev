@@ -21,3 +21,11 @@ jest.mock('expo-speech', () => ({
   speak: jest.fn(),
   stop: jest.fn(),
 }));
+
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn(async () => {}),
+  notificationAsync: jest.fn(async () => {}),
+  selectionAsync: jest.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Soft: 'soft', Rigid: 'rigid' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+}));
