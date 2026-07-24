@@ -19,8 +19,28 @@ const model = () => process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 // sounds far more human than a device speech synthesizer. Voice is a Gemini
 // prebuilt voice name; "Sulafat" is warm and friendly, which suits the
 // elderly-first assistant.
-const ttsModel = () => process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
+//
+// Default to the current, un-pinned TTS id. The older "gemini-2.5-flash-preview-tts"
+// pin now 404s on newly-issued keys (same story as the chat "-latest" note
+// above), which silently dropped the assistant to the robotic device voice.
+const ttsModel = () => process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-tts';
 const ttsVoice = () => process.env.GEMINI_TTS_VOICE || 'Sulafat';
+
+// Every id here is a real neural-TTS model that can return spoken audio via
+// generateContent. (An earlier build listed plain chat models such as
+// gemini-2.5-flash / gemini-2.0-flash as fallbacks — but those cannot
+// synthesize speech at all, so once the primary failed EVERY fallback failed
+// and the app fell back to the generic on-device voice.) Ordered newest/most
+// available first; the pinned "-preview-" ids are kept last for older keys
+// that still resolve them.
+const TTS_FALLBACK_MODELS = [
+  'gemini-2.5-flash-tts',
+  'gemini-2.5-pro-tts',
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-lite-preview-tts',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-2.5-pro-preview-tts',
+];
 
 export const geminiEnabled = () => Boolean(key());
 
@@ -185,7 +205,7 @@ export async function synthesizeSpeech(text, { voice } = {}) {
   const clean = String(text ?? '').trim();
   if (!clean) throw new Error('No text to speak');
 
-  const modelsToTry = Array.from(new Set([ttsModel(), 'gemini-2.5-flash-preview-tts', 'gemini-2.5-flash', 'gemini-2.0-flash']));
+  const modelsToTry = Array.from(new Set([ttsModel(), ...TTS_FALLBACK_MODELS]));
   let lastErr = null;
 
   for (const targetModel of modelsToTry) {
@@ -220,8 +240,14 @@ export async function synthesizeSpeech(text, { voice } = {}) {
       return { audio: data, mimeType, rate };
     } catch (err) {
       lastErr = err;
-      if (err.status === 404 || err.status === 400) {
-        console.warn(`[tts] ${targetModel} failed (${err.status}), trying candidate model...`);
+      // Availability/transient errors (model unavailable on this key, rate
+      // limited, upstream hiccup) — move on to the next TTS candidate rather
+      // than giving up and dropping to the device voice. Only a hard auth
+      // failure (401/403) means no model will ever work, so stop there.
+      const status = err.status ?? 0;
+      const tryNext = status === 400 || status === 404 || status === 429 || status >= 500 || status === 0;
+      if (tryNext) {
+        console.warn(`[tts] ${targetModel} failed (${status || err.message}), trying next TTS model...`);
         continue;
       }
       throw err;

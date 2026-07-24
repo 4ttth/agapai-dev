@@ -322,6 +322,16 @@ export function useGeminiLive() {
       { sampleRate: INPUT_RATE, bufferLength: BUFFER_LENGTH, channelCount: 1 },
       ({ buffer }) => {
         if (!readyRef.current || ws.readyState !== WebSocket.OPEN) return;
+        // Self-heal a stuck mute: normally `turnComplete` schedules the timer
+        // that reopens the mic, but if that frame is dropped (flaky network),
+        // aiSpeaking would stay true forever and the mic would never reopen —
+        // which the patient experiences as the assistant going silent and never
+        // taking their next turn. Once the projected playback end is well past
+        // (and no fresh audio has pushed it forward), force the mic back on.
+        if (aiSpeakingRef.current && Date.now() > muteMicUntilRef.current + 1500) {
+          aiSpeakingRef.current = false;
+          setSpeaking(false);
+        }
         // Suppress sending mic audio while AI is outputting/playing audio to prevent speaker echo
         // from feeding back into the mic and triggering false Gemini self-interruptions.
         if (aiSpeakingRef.current || Date.now() < muteMicUntilRef.current) return;

@@ -114,8 +114,27 @@ export async function everifyQuery({ firstName, lastName, middleName, suffix, bi
     20000,
   );
   const data = body?.data ?? body;
-  // 200 with a returned record is a confirmed demographic + biometric match.
-  const matched = status === 200 && !!(data?.full_name || data?.first_name || data?.reference);
+
+  // Some eVerify responses carry the match verdict explicitly in the body and
+  // still return HTTP 200 with the demographic record even on a face MISMATCH.
+  // Honor any explicit verdict so a different live person can't pass just
+  // because the name + birth date belong to a real PhilSys record (the exact
+  // "any face passes" failure). Absent such a field, behavior is unchanged.
+  const verdict =
+    data?.match ?? data?.matched ?? data?.is_match ?? data?.face_match ?? data?.verified ?? null;
+  const verdictSaysNo =
+    verdict === false || ['false', 'no', 'not_matched', 'mismatch', 'fail', 'failed'].includes(String(verdict).toLowerCase());
+
+  // A numeric face/verification score, when provided, must clear the threshold.
+  const scoreRaw = data?.match_score ?? data?.face_score ?? data?.verification_score ?? null;
+  const scoreNum = scoreRaw == null ? null : parseFloat(String(scoreRaw).replace(/[^0-9.]/g, ''));
+  const scoreThreshold = Number(process.env.EVERIFY_MATCH_THRESHOLD ?? 0);
+  const scoreSaysNo = scoreNum != null && !isNaN(scoreNum) && scoreThreshold > 0 && scoreNum < scoreThreshold;
+
+  const hasRecord = !!(data?.full_name || data?.first_name || data?.reference);
+  // 200 + a returned record is a demographic + biometric match, unless the body
+  // explicitly says the face did not match.
+  const matched = status === 200 && hasRecord && !verdictSaysNo && !scoreSaysNo;
   if (!matched) {
     return { ok: false, matched: false, status, data };
   }
