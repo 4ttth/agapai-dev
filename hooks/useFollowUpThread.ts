@@ -35,6 +35,8 @@ export function useFollowUpThread(threadId: string, threadKey: string | null, my
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [live, setLive] = useState(false);
 
+  const [incomingCall, setIncomingCall] = useState(false);
+
   const seen = useRef<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -132,8 +134,13 @@ export function useFollowUpThread(threadId: string, threadKey: string | null, my
         const raw = typeof event.data === 'string' ? event.data : '';
         if (!raw) return;
         const msg = JSON.parse(raw);
-        if (msg.type === 'message' && msg.threadId === threadId && msg.message) {
+        if (msg.threadId !== threadId) return;
+        if (msg.type === 'message' && msg.message) {
           ingest([msg.message as FollowUpMessageRow]);
+        } else if (msg.type === 'call-invite' && msg.fromRole !== myRole) {
+          setIncomingCall(true);
+        } else if (msg.type === 'call-end' || msg.type === 'call-decline') {
+          setIncomingCall(false);
         }
       } catch {
         /* ignore malformed frame */
@@ -153,7 +160,7 @@ export function useFollowUpThread(threadId: string, threadKey: string | null, my
       }
       wsRef.current = null;
     };
-  }, [status, threadId, ingest, refresh]);
+  }, [status, threadId, myRole, ingest, refresh]);
 
   const send = useCallback(
     async (text: string) => {
@@ -171,5 +178,14 @@ export function useFollowUpThread(threadId: string, threadKey: string | null, my
     setThread(updated);
   }, [threadId]);
 
-  return { status, error, thread, shares, messages, live, send, close, refresh };
+  const declineIncomingCall = useCallback(() => {
+    try {
+      wsRef.current?.send(JSON.stringify({ type: 'call-decline', threadId }));
+    } catch {
+      /* ignore */
+    }
+    setIncomingCall(false);
+  }, [threadId]);
+
+  return { status, error, thread, shares, messages, live, incomingCall, send, close, refresh, declineIncomingCall };
 }

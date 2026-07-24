@@ -184,32 +184,48 @@ export async function classifyMedicationCategory(name) {
 export async function synthesizeSpeech(text, { voice } = {}) {
   const clean = String(text ?? '').trim();
   if (!clean) throw new Error('No text to speak');
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${ttsModel()}:generateContent?key=${key()}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        // Cap length so a very long record can't blow the TTS request timeout.
-        contents: [{ parts: [{ text: clean.slice(0, 2000) }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || ttsVoice() } },
-          },
+
+  const modelsToTry = Array.from(new Set([ttsModel(), 'gemini-2.5-flash-preview-tts', 'gemini-2.5-flash', 'gemini-2.0-flash']));
+  let lastErr = null;
+
+  for (const targetModel of modelsToTry) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // Cap length so a very long record can't blow the TTS request timeout.
+            contents: [{ parts: [{ text: clean.slice(0, 2000) }] }],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || ttsVoice() } },
+              },
+            },
+          }),
+          signal: AbortSignal.timeout(30000),
         },
-      }),
-      signal: AbortSignal.timeout(30000),
-    },
-  );
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw Object.assign(new Error(`Gemini TTS failed (${res.status})`), { status: res.status, body });
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw Object.assign(new Error(`Gemini TTS failed with ${targetModel} (${res.status})`), { status: res.status, body });
+      }
+      const part = body?.candidates?.[0]?.content?.parts?.find((p) => p?.inlineData?.data);
+      const data = part?.inlineData?.data;
+      if (!data) throw new Error(`Gemini TTS returned no audio with ${targetModel}`);
+      const mimeType = part.inlineData.mimeType || 'audio/pcm;rate=24000';
+      const rate = Number(/rate=(\d+)/.exec(mimeType)?.[1]) || 24000;
+      return { audio: data, mimeType, rate };
+    } catch (err) {
+      lastErr = err;
+      if (err.status === 404 || err.status === 400) {
+        console.warn(`[tts] ${targetModel} failed (${err.status}), trying candidate model...`);
+        continue;
+      }
+      throw err;
+    }
   }
-  const part = body?.candidates?.[0]?.content?.parts?.find((p) => p?.inlineData?.data);
-  const data = part?.inlineData?.data;
-  if (!data) throw new Error('Gemini TTS returned no audio');
-  const mimeType = part.inlineData.mimeType || 'audio/pcm;rate=24000';
-  const rate = Number(/rate=(\d+)/.exec(mimeType)?.[1]) || 24000;
-  return { audio: data, mimeType, rate };
+  throw lastErr;
 }

@@ -1,9 +1,9 @@
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Alert, Platform } from 'react-native';
 
 import { serverApi } from '@/services/api/server';
-import { setAuthToken } from '@/services/api/http';
+import { ApiError, setAuthToken, setOnUnauthorized } from '@/services/api/http';
 import type { AgapaiSession, ServerUser, VerifiedIdentity } from '@/types';
-import { Platform } from 'react-native';
 
 import { makePatientKey } from '@/utils/crypto';
 import { getDeviceId } from '@/utils/device';
@@ -59,6 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const signOut = useCallback(async () => {
+    // The patient key mapping stays on-device so records reopen on next sign-in.
+    await removeKeys([SESSION_KEY]);
+    setAuthToken(null);
+    setSession(null);
+    setPending(null);
+    setStatus('signedOut');
+  }, []);
+
+  useEffect(() => {
+    setOnUnauthorized((msg) => {
+      void signOut();
+      Alert.alert('Session Expired', msg || 'You have been logged out or no account found for this ID');
+    });
+    return () => setOnUnauthorized(null);
+  }, [signOut]);
+
   useEffect(() => {
     let active = true;
     readJson<AgapaiSession | null>(SESSION_KEY, null).then((restored) => {
@@ -75,7 +92,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(next);
             void writeJson(SESSION_KEY, next);
           })
-          .catch(() => {});
+          .catch((err) => {
+            if (
+              err instanceof ApiError &&
+              (err.status === 401 || err.message.includes('logged out') || err.message.includes('no account found'))
+            ) {
+              void signOut();
+              Alert.alert('Session Expired', err.message);
+            }
+          });
       } else {
         setStatus('signedOut');
       }
@@ -83,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [signOut]);
 
   const persistSession = useCallback(
     async (token: string, user: ServerUser, opts: { isRegistration?: boolean } = {}) => {
@@ -206,14 +231,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session],
   );
 
-  const signOut = useCallback(async () => {
-    // The patient key mapping stays on-device so records reopen on next sign-in.
-    await removeKeys([SESSION_KEY]);
-    setAuthToken(null);
-    setSession(null);
-    setPending(null);
-    setStatus('signedOut');
-  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

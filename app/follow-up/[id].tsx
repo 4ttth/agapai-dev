@@ -41,11 +41,8 @@ export default function FollowUpChatScreen() {
       .catch(() => {});
   }, [id]);
 
-  const { status, error, thread, shares, messages, live, send, close } = useFollowUpThread(
-    id,
-    threadKey,
-    'PATIENT',
-  );
+  const { status, error, thread, shares, messages, live, incomingCall, send, close, declineIncomingCall } =
+    useFollowUpThread(id, threadKey, 'PATIENT');
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -99,13 +96,17 @@ export default function FollowUpChatScreen() {
         </View>
         {callEnabled && !closed ? (
           <Pressable
-            onPress={() => router.push(`/follow-up/call/${id}?mode=caller` as never)}
+            onPress={() =>
+              router.push(
+                `/follow-up/call/${id}?mode=${incomingCall ? 'callee' : 'caller'}` as never,
+              )
+            }
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="Call doctor"
-            style={styles.iconBtn}
+            style={[styles.iconBtn, incomingCall && styles.incomingIconBtn]}
           >
-            <Ionicons name="call" size={22} color={colors.primary} />
+            <Ionicons name="call" size={22} color={incomingCall ? colors.onPrimary : colors.primary} />
           </Pressable>
         ) : null}
         {!closed ? (
@@ -120,6 +121,35 @@ export default function FollowUpChatScreen() {
           </Pressable>
         ) : null}
       </View>
+
+      {incomingCall ? (
+        <View style={styles.callBanner}>
+          <Ionicons name="call" size={20} color={colors.onPrimary} />
+          <AppText variant="body" color="inverse" style={styles.callBannerText}>
+            Incoming call from Dr. {thread?.counterpart?.lastName}…
+          </AppText>
+          <Pressable
+            onPress={declineIncomingCall}
+            style={[styles.callBannerBtn, styles.declineBtn]}
+            accessibilityRole="button"
+            accessibilityLabel="Decline call"
+          >
+            <AppText variant="caption" color="inverse">
+              Decline
+            </AppText>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push(`/follow-up/call/${id}?mode=callee` as never)}
+            style={[styles.callBannerBtn, styles.answerBtn]}
+            accessibilityRole="button"
+            accessibilityLabel="Answer call"
+          >
+            <AppText variant="caption" color="inverse">
+              Answer
+            </AppText>
+          </Pressable>
+        </View>
+      ) : null}
 
       {shares.length > 0 ? (
         <View style={styles.sharesBar}>
@@ -246,4 +276,21 @@ const styles = StyleSheet.create({
   },
   sendDisabled: { opacity: 0.4 },
   closedBar: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
+  incomingIconBtn: { backgroundColor: colors.success },
+  callBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  callBannerText: { flex: 1 },
+  callBannerBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+  },
+  declineBtn: { backgroundColor: colors.danger },
+  answerBtn: { backgroundColor: colors.success },
 });

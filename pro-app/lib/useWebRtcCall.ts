@@ -139,7 +139,9 @@ export function useWebRtcCall({ threadId, initiator }: { threadId: string; initi
         }
         if (!msg || msg.threadId !== threadId) return;
 
-        if (msg.type === 'call-invite' && !initiator) {
+        if (msg.type === 'presence' && msg.state === 'join' && initiator) {
+          ws.send(JSON.stringify({ type: 'call-invite', threadId }));
+        } else if (msg.type === 'call-invite' && !initiator) {
           setState('ringing');
         } else if (msg.type === 'call-decline' || msg.type === 'call-end') {
           hangUp();

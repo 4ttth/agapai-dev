@@ -27,13 +27,26 @@ export function verifyToken(token) {
   }
 }
 
-/** Express middleware — attaches req.auth ({id, role}) or 401s. */
-export function requireAuth(req, res, next) {
-  const header = req.headers.authorization || '';
-  const data = verifyToken(header.replace(/^Bearer /, ''));
-  if (!data) return res.status(401).json({ error: 'Unauthorized' });
-  req.auth = data;
-  next();
+import { prisma } from './db.js';
+
+/** Express middleware — attaches req.auth ({id, role}) and req.user or 401s. */
+export async function requireAuth(req, res, next) {
+  try {
+    const header = req.headers.authorization || '';
+    const data = verifyToken(header.replace(/^Bearer /, ''));
+    if (!data) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+
+    const user = await prisma.user.findUnique({ where: { id: data.id } }).catch(() => null);
+    if (!user) {
+      return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    }
+
+    req.auth = data;
+    req.user = user;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+  }
 }
 
 /**

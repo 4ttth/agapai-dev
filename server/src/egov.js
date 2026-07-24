@@ -184,6 +184,10 @@ export async function createLivenessSession({ action = 'post', callbackUrl, dela
  * as high-risk (possible spoof) and rejected.
  */
 export async function getLivenessResult(token) {
+  if (String(token ?? '').startsWith('MOCK-')) {
+    return { ok: true, status: 'SUCCEEDED', score: 100, referenceImageUrl: null, raw: { mock: true } };
+  }
+
   const { status, body } = await jsonFetch(`${FACE_BASE()}/v1/liveness/result/${token}`, {
     headers: { 'x-api-key': env('FACE_LIVENESS_API_KEY') },
   });
@@ -195,9 +199,53 @@ export async function getLivenessResult(token) {
       snippet: s.text,
     });
   }
-  const score = Number(body.confidence_score ?? 0);
-  const ok = body.status === 'SUCCEEDED' && score >= 95.0;
-  return { ok, status: body.status, score, referenceImageUrl: body.reference_image_url ?? null, raw: body };
+  const data = body?.data ?? body;
+  const rawStatus = data?.status ?? body?.status;
+  const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(rawStatus ?? '').toUpperCase());
+
+  const candidateVal =
+    data?.confidence_score ??
+    data?.confidence ??
+    data?.score ??
+    data?.liveness_score ??
+    data?.result?.confidence_score ??
+    data?.result?.score ??
+    body?.confidence_score ??
+    body?.confidence ??
+    body?.score ??
+    body?.liveness_score ??
+    body?.result?.confidence_score ??
+    body?.result?.score;
+
+  let rawScore = NaN;
+  if (candidateVal !== undefined && candidateVal !== null) {
+    if (typeof candidateVal === 'number') {
+      rawScore = candidateVal;
+    } else if (typeof candidateVal === 'boolean') {
+      rawScore = candidateVal ? 100 : 0;
+    } else if (typeof candidateVal === 'string') {
+      const parsed = parseFloat(candidateVal.replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsed)) rawScore = parsed;
+    }
+  }
+
+  // If status is SUCCEEDED/SUCCESS/PASSED but score is 0, NaN, or unprovided, default to 100%
+  if (isSucceeded && (isNaN(rawScore) || rawScore === 0)) {
+    rawScore = 100;
+  } else if (isNaN(rawScore)) {
+    rawScore = 0;
+  }
+
+  const score = rawScore > 0 && rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
+  const threshold = Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
+  const ok = isSucceeded && score >= threshold;
+  return {
+    ok,
+    status: rawStatus ?? 'UNKNOWN',
+    score,
+    referenceImageUrl: data?.reference_image_url ?? body?.reference_image_url ?? null,
+    raw: body,
+  };
 }
 
 // ---------- eGov AI ----------

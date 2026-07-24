@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { RefreshControl, StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/states/EmptyState';
 import { ErrorState } from '@/components/states/ErrorState';
@@ -14,6 +14,22 @@ import { colors, spacing } from '@/theme';
 export default function MedicationsScreen() {
   const router = useRouter();
   const { status, error, refresh, medications } = useMedications();
+  const [refreshing, setRefreshing] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   const openMedication = useCallback((id: string) => router.push(`/medication/${id}`), [router]);
 
@@ -27,7 +43,10 @@ export default function MedicationsScreen() {
 
   if (medications.length === 0) {
     return (
-      <Screen contentContainerStyle={styles.emptyContainer}>
+      <Screen
+        contentContainerStyle={styles.emptyContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
         <EmptyState
           icon="medkit-outline"
           title="No medicines yet"
@@ -40,7 +59,7 @@ export default function MedicationsScreen() {
   }
 
   return (
-    <Screen>
+    <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}>
       <View style={styles.list}>
         {medications.map((medication) => (
           <PillCard key={medication.id} medication={medication} onPress={openMedication} />

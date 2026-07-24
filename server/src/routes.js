@@ -89,6 +89,7 @@ async function verifyLivenessToken(token, { purpose = 'generic', userId = null }
 // setting EVERIFY_IDENTITY_MATCH=off — but it defaults ON, because a plain
 // liveness check only proves *a* live person, not *which* person.
 const identityMatchEnabled = () => (process.env.EVERIFY_IDENTITY_MATCH || 'on').toLowerCase() !== 'off';
+const getLivenessThreshold = () => Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
 
 /**
  * Prove that the person in front of the camera is the account holder — not just
@@ -105,12 +106,13 @@ async function verifyAccountHolder(token, user, purpose) {
   const live = await verifyLivenessToken(token, { purpose, userId: user?.id ?? null });
   if (!live.ok) return { ...live, ok: false, reason: 'liveness' };
 
-  if (!identityMatchEnabled()) return { ...live, matched: null };
+  if (!identityMatchEnabled()) return { ...live, status: live.status, matched: null };
 
   if (!user?.firstName || !user?.lastName || !user?.birthDate) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'This account has no verified National ID identity on file to match against.',
     };
@@ -131,6 +133,7 @@ async function verifyAccountHolder(token, user, purpose) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'Could not confirm your identity with eVerify. Please try again.',
     };
@@ -141,11 +144,12 @@ async function verifyAccountHolder(token, user, purpose) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'That face does not match the National ID on this account.',
     };
   }
-  return { ok: true, score: live.score, matched: true };
+  return { ok: true, score: live.score, status: live.status, matched: true };
 }
 
 /**
@@ -318,13 +322,20 @@ api.post(
     let liveVerified = false;
     if (b.livenessToken) {
       const live = await verifyLivenessToken(b.livenessToken, { purpose: `register:${role}` });
-      if (!live.ok)
+      if (!live.ok) {
+        const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(live.status ?? '').toUpperCase());
+        const thresh = getLivenessThreshold();
+        const errorMsg =
+          isSucceeded && live.score < thresh
+            ? `Face Liveness score too low (${live.score}% < ${thresh}% required). Please try the liveness test again.`
+            : `Face Liveness check did not pass (${live.status ?? 'no result'}${
+                live.score ? `, score ${live.score}%` : ''
+              }). Please try the liveness test again.`;
         return res.status(403).json({
-          error: `Face Liveness check did not pass (${live.status ?? 'no result'}${
-            live.score ? `, score ${live.score}` : ''
-          }). Please try the liveness test again.`,
+          error: errorMsg,
           liveness: live,
         });
+      }
 
       // Anti-spoof liveness only proves *a* live person is present — not that
       // it is the person whose National ID was just scanned. Bind the live face
@@ -532,14 +543,20 @@ api.post(
     const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     const check = await verifyAccountHolder(livenessToken, me, 'edit-unlock');
-    if (!check.ok)
+    if (!check.ok) {
+      const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const thresh = getLivenessThreshold();
+      const errorMsg =
+        check.reason === 'identity'
+          ? check.error
+          : isSucceeded && check.score < thresh
+          ? `Face Liveness confidence score too low (${check.score}% < ${thresh}% required).`
+          : `Face Liveness check did not pass (${check.status ?? 'no result'}).`;
       return res.status(403).json({
-        error:
-          check.reason === 'identity'
-            ? check.error
-            : `Face Liveness check did not pass (${check.status ?? 'no result'}).`,
+        error: errorMsg,
         liveness: check,
       });
+    }
     await prisma.user.update({ where: { id: req.auth.id }, data: { everified: true, liveVerified: true } });
     res.json({ verified: true, score: check.score });
   }),
@@ -614,14 +631,20 @@ api.post(
     const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     const check = await verifyAccountHolder(livenessToken, me, 'key-recovery');
-    if (!check.ok)
+    if (!check.ok) {
+      const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const thresh = getLivenessThreshold();
+      const errorMsg =
+        check.reason === 'identity'
+          ? `${check.error} Records stay locked.`
+          : isSucceeded && check.score < thresh
+          ? `Face Liveness confidence score too low (${check.score}% < ${thresh}% required). Records stay locked.`
+          : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`;
       return res.status(403).json({
-        error:
-          check.reason === 'identity'
-            ? `${check.error} Records stay locked.`
-            : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`,
+        error: errorMsg,
         liveness: check,
       });
+    }
     const escrow = await prisma.keyEscrow.findUnique({ where: { userId: req.auth.id } });
     if (!escrow) return res.status(404).json({ error: 'No escrowed key for this account yet.' });
     let patientKey;
@@ -702,7 +725,7 @@ api.post(
       const out = await synthesizeSpeech(text, { voice });
       return res.json(out);
     } catch (err) {
-      console.error('[tts] failed:', err.status, err.message);
+      console.error('[tts] failed:', err.status, err.message, err.body ? JSON.stringify(err.body) : '');
       return res.status(502).json({ error: 'Could not generate speech right now.' });
     }
   }),
@@ -756,8 +779,9 @@ api.post(
   '/consultations',
   requireAuth,
   wrap(async (req, res) => {
-    const doctor = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!doctor || doctor.role !== 'DOCTOR') return res.status(403).json({ error: 'Doctors only' });
+    const doctor = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!doctor) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (doctor.role !== 'DOCTOR') return res.status(403).json({ error: 'Doctors only' });
     if (!doctor.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const b = req.body;
     if (!b.patientId || !b.ciphertext || !b.iv || !b.salt || !b.type)
@@ -843,8 +867,9 @@ api.get(
   '/consultations/latest/:patientId',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
     if (!me.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const latest = await prisma.consultation.findFirst({
       where: { patientId: req.params.patientId },
@@ -1032,14 +1057,24 @@ api.get(
   '/follow-up/ice',
   requireAuth,
   wrap(async (_req, res) => {
-    const iceServers = [{ urls: (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',') }];
-    if (process.env.TURN_URL) {
+    const defaultStun = 'stun:stun.l.google.com:19302';
+    const stunString = process.env.STUN_URLS || defaultStun;
+    
+    const iceServers = [{ 
+      urls: stunString.split(','),
+      url: stunString.split(',')[0] // Fallback for strict/older native clients
+    }];
+
+    // Strict safety check: ONLY push TURN if the env vars are actually loaded
+    if (process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_PASSWORD) {
       iceServers.push({
         urls: process.env.TURN_URL.split(','),
-        username: process.env.TURN_USERNAME || undefined,
-        credential: process.env.TURN_PASSWORD || undefined,
+        url: process.env.TURN_URL.split(',')[0], // Fallback for strict/older native clients
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_PASSWORD,
       });
     }
+
     res.json({ iceServers });
   }),
 );
@@ -1053,8 +1088,9 @@ api.get(
   '/follow-up/eligibility',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
     const recent = await mostRecentDoctorFor(me.id);
     if (!recent) return res.json({ eligible: false, reason: 'no-consultation' });
     const { doctor, consultationId } = recent;
@@ -1095,8 +1131,9 @@ api.post(
   '/follow-up/threads',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
     const b = req.body || {};
     const recent = await mostRecentDoctorFor(me.id);
     if (!recent) return res.status(403).json({ error: 'You have no consultation to follow up on yet.' });
@@ -1330,8 +1367,9 @@ api.post(
   '/dispense',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
     if (!me.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const { patientId, consultationId, items } = req.body;
     if (!patientId || !Array.isArray(items) || items.length === 0)
@@ -1621,6 +1659,66 @@ api.get(
   wrap(async (_req, res) => {
     const rows = await prisma.metric.findMany({ orderBy: { at: 'desc' }, take: 100 });
     res.json({ metrics: rows });
+  }),
+);
+
+/**
+ * Paginated verbose request log for the admin dashboard.
+ * Supports filtering by method, status class (2xx/4xx/5xx), and a route search.
+ * Returns at most 50 rows per page; rows are pruned after 7 days by cron.
+ */
+api.get(
+  '/admin/request-logs',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const page     = Math.max(1, Number(req.query.page)     || 1);
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20));
+    const method   = String(req.query.method || '').toUpperCase();
+    const route    = String(req.query.route  || '').trim();
+    const statusClass = String(req.query.statusClass || '').trim(); // '2xx' | '4xx' | '5xx'
+
+    const where = {
+      ...(method && ['GET','POST','PUT','PATCH','DELETE'].includes(method) ? { method } : {}),
+      ...(route ? { route: { contains: route, mode: 'insensitive' } } : {}),
+      ...(statusClass === '2xx' ? { status: { gte: 200, lt: 300 } } :
+          statusClass === '3xx' ? { status: { gte: 300, lt: 400 } } :
+          statusClass === '4xx' ? { status: { gte: 400, lt: 500 } } :
+          statusClass === '5xx' ? { status: { gte: 500, lt: 600 } } : {}),
+    };
+
+    const [total, logs] = await Promise.all([
+      prisma.requestLog.count({ where }),
+      prisma.requestLog.findMany({
+        where,
+        orderBy: { at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        // Don't send heavy body fields in the list view — load them on demand.
+        select: {
+          id: true, method: true, route: true, fullPath: true,
+          status: true, ms: true, ip: true, at: true,
+        },
+      }),
+    ]);
+
+    res.json({
+      logs,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }),
+);
+
+/** Single request-log detail (includes full headers + bodies). */
+api.get(
+  '/admin/request-logs/:id',
+  requireAdmin,
+  wrap(async (req, res) => {
+    const log = await prisma.requestLog.findUnique({ where: { id: req.params.id } });
+    if (!log) return res.status(404).json({ error: 'Log entry not found.' });
+    res.json({ log });
   }),
 );
 

@@ -79,8 +79,19 @@ export function useGeminiLive() {
   const readyRef = useRef(false);
   const stoppingRef = useRef(false);
 
+  // Mute mic transmission while AI is outputting audio to prevent self-interruption echo loops.
+  const aiSpeakingRef = useRef(false);
+  const muteMicUntilRef = useRef(0);
+  const speakingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const teardown = useCallback(() => {
     readyRef.current = false;
+    if (speakingTimeoutRef.current) {
+      clearTimeout(speakingTimeoutRef.current);
+      speakingTimeoutRef.current = null;
+    }
+    aiSpeakingRef.current = false;
+    muteMicUntilRef.current = 0;
     try {
       recorderRef.current?.clearOnAudioReady();
       void recorderRef.current?.stop();
@@ -212,6 +223,12 @@ export function useGeminiLive() {
           // Barge-in: drop anything still queued so the reply stops promptly.
           if (msg.serverContent?.interrupted) {
             queueRef.current?.clearBuffers();
+            if (speakingTimeoutRef.current) {
+              clearTimeout(speakingTimeoutRef.current);
+              speakingTimeoutRef.current = null;
+            }
+            aiSpeakingRef.current = false;
+            muteMicUntilRef.current = 0;
             setSpeaking(false);
             return;
           }
@@ -225,20 +242,31 @@ export function useGeminiLive() {
               // trust it rather than assuming, so a format change can't
               // silently play everything back at the wrong pitch.
               const declared = Number(/rate=(\d+)/.exec(part?.inlineData?.mimeType ?? '')?.[1]);
-              const buffer = await decodePCMInBase64(
-                data,
-                Number.isFinite(declared) && declared > 0 ? declared : OUTPUT_RATE,
-                1,
-              );
+              const sampleRate = Number.isFinite(declared) && declared > 0 ? declared : OUTPUT_RATE;
+              const buffer = await decodePCMInBase64(data, sampleRate, 1);
               queueRef.current?.enqueueBuffer(buffer);
+
+              // Calculate chunk duration in ms to track queue playback depth.
+              const chunkMs = (buffer.length / sampleRate) * 1000;
+              const now = Date.now();
+              muteMicUntilRef.current = Math.max(now, muteMicUntilRef.current) + chunkMs;
+              aiSpeakingRef.current = true;
               setSpeaking(true);
             } catch {
               // A single corrupt chunk shouldn't end the call.
             }
           }
           if (msg.serverContent?.turnComplete) {
-            setSpeaking(false);
             flushAi(); // the assistant's turn is done — commit it to the transcript
+
+            // Keep the mic muted and speaking state active until the queued audio
+            // finishes playing, plus a 400ms safety tail for speaker reverb decay.
+            const remainingMs = Math.max(0, muteMicUntilRef.current + 400 - Date.now());
+            if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+            speakingTimeoutRef.current = setTimeout(() => {
+              aiSpeakingRef.current = false;
+              setSpeaking(false);
+            }, remainingMs);
           }
         };
 
@@ -294,6 +322,9 @@ export function useGeminiLive() {
       { sampleRate: INPUT_RATE, bufferLength: BUFFER_LENGTH, channelCount: 1 },
       ({ buffer }) => {
         if (!readyRef.current || ws.readyState !== WebSocket.OPEN) return;
+        // Suppress sending mic audio while AI is outputting/playing audio to prevent speaker echo
+        // from feeding back into the mic and triggering false Gemini self-interruptions.
+        if (aiSpeakingRef.current || Date.now() < muteMicUntilRef.current) return;
         try {
           const pcm = floatToPcm16(buffer.getChannelData(0));
           // The recorder may hand back a different rate than requested

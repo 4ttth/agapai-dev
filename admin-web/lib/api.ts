@@ -93,3 +93,30 @@ export interface UsersPage {
   total: number;
   totalPages: number;
 }
+
+// ---- Request Logs ----
+
+export interface RequestLogRow {
+  id: string;
+  method: string;
+  route: string;
+  fullPath: string;
+  status: number;
+  ms: number;
+  ip: string | null;
+  at: string;
+}
+
+export interface RequestLogDetail extends RequestLogRow {
+  reqHeaders: string;
+  reqBody: string;
+  resBody: string;
+}
+
+export interface RequestLogsPage {
+  logs: RequestLogRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}

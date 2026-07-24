@@ -14,7 +14,7 @@ import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Alert, Platform, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { useAuth } from '@/hooks/useAuth';
@@ -62,11 +62,11 @@ function useNotificationHaptics() {
   }, []);
 }
 
-/** Route a tapped reminder to the screen it's about. */
+/** Route a tapped reminder or foreground incoming call to the screen it's about. */
 function useNotificationRouting() {
   const router = useRouter();
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subResponse = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data ?? {};
       const kind = data.kind;
       if (kind === 'medication-reminder') router.push('/(tabs)/medications');
@@ -76,7 +76,26 @@ function useNotificationRouting() {
       else if (kind === 'follow-up-message' && data.threadId)
         router.push(`/follow-up/${data.threadId}` as never);
     });
-    return () => sub.remove();
+
+    const subReceived = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data ?? {};
+      if (data.kind === 'follow-up-call' && data.threadId) {
+        const title = notification.request.content.title || 'Incoming Call';
+        const body = notification.request.content.body || 'You have an incoming call';
+        Alert.alert(title, body, [
+          { text: 'Decline', style: 'cancel' },
+          {
+            text: 'Answer',
+            onPress: () => router.push(`/follow-up/call/${data.threadId}?mode=callee` as never),
+          },
+        ]);
+      }
+    });
+
+    return () => {
+      subResponse.remove();
+      subReceived.remove();
+    };
   }, [router]);
 }
 

@@ -19,6 +19,13 @@ export class ApiError extends Error {
   }
 }
 
+type UnauthorizedCallback = (msg: string) => void;
+let unauthorizedListener: UnauthorizedCallback | null = null;
+
+export function setOnUnauthorized(cb: UnauthorizedCallback | null) {
+  unauthorizedListener = cb;
+}
+
 /** JSON fetch against the AgapAI server with bearer auth + timeout. */
 export async function api<T>(
   path: string,
@@ -46,6 +53,11 @@ export async function api<T>(
     if (!res.ok) {
       const msg =
         (data as { error?: string })?.error ?? `Request failed (${res.status}). Please try again.`;
+      if (msg.includes('logged out') || msg.includes('no account found')) {
+        if (unauthorizedListener) {
+          unauthorizedListener(msg);
+        }
+      }
       throw new ApiError(msg, res.status);
     }
     return data as T;
