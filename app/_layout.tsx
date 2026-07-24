@@ -45,9 +45,22 @@ function HeaderBackButton() {
 import * as Notifications from 'expo-notifications';
 
 import { configureNotificationHandler } from '@/utils/notifications';
+import { signatureBuzz } from '@/utils/haptics';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 configureNotificationHandler();
+
+/**
+ * Play the AgapAI signature buzz whenever a notification arrives while the app
+ * is foregrounded, so a patient learns the app's "feel". (On the lock screen the
+ * signature comes instead from the bundled custom sound / Android channel.)
+ */
+function useNotificationHaptics() {
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener(() => signatureBuzz());
+    return () => sub.remove();
+  }, []);
+}
 
 /** Route a tapped reminder or foreground incoming call to the screen it's about. */
 function useNotificationRouting() {
@@ -118,6 +131,7 @@ function useProtectedRoute() {
 function RootNavigator() {
   useProtectedRoute();
   useNotificationRouting();
+  useNotificationHaptics();
   return (
     <Stack
       screenOptions={{

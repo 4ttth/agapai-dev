@@ -14,10 +14,22 @@ jest.mock('expo-notifications', () => ({
   scheduleNotificationAsync: jest.fn(async () => 'notif-id'),
   cancelScheduledNotificationAsync: jest.fn(async () => {}),
   cancelAllScheduledNotificationsAsync: jest.fn(async () => {}),
+  setNotificationChannelAsync: jest.fn(async () => {}),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   SchedulableTriggerInputTypes: { DAILY: 'daily' },
+  AndroidImportance: { MAX: 5, HIGH: 4, DEFAULT: 3 },
 }));
 
 jest.mock('expo-speech', () => ({
   speak: jest.fn(),
   stop: jest.fn(),
+}));
+
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn(async () => {}),
+  notificationAsync: jest.fn(async () => {}),
+  selectionAsync: jest.fn(async () => {}),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Soft: 'soft', Rigid: 'rigid' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
 }));

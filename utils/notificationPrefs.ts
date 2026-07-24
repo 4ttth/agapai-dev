@@ -21,6 +21,8 @@ export interface NotificationPrefs {
   moodReminderTime: string;
   /** Reminders before each medication dose. Default on. */
   medications: boolean;
+  /** Haptic feedback for interactions and the AgapAI signature buzz. Default on. */
+  haptics: boolean;
 }
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
@@ -29,6 +31,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   moodReminder: true,
   moodReminderTime: '08:00',
   medications: true,
+  haptics: true,
 };
 
 /** Read the saved prefs, filling any missing field from the defaults. */

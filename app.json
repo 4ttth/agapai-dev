@@ -69,7 +69,8 @@
       [
         "expo-notifications",
         {
-          "color": "#0B4F9E"
+          "color": "#0B4F9E",
+          "sounds": ["./assets/sounds/agapai.wav"]
         }
       ],
       [
@@ -91,7 +92,9 @@
         }
       ],
       "expo-audio",
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      "@bacons/apple-targets",
+      "./plugins/withAgapaiLiveActivity"
     ],
     "experiments": {
       "typedRoutes": true

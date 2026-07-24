@@ -1,5 +1,11 @@
-import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import type { ReactElement, ReactNode } from 'react';
+import {
+  ScrollView,
+  StyleSheet,
+  View,
+  type RefreshControlProps,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, layout } from '@/theme';
@@ -12,6 +18,8 @@ interface ScreenProps {
   edgeToEdge?: boolean;
   contentContainerStyle?: ViewStyle;
   background?: 'default' | 'muted' | 'primary';
+  /** Optional pull-to-refresh control, forwarded to the scroll view. */
+  refreshControl?: ReactElement<RefreshControlProps>;
   testID?: string;
 }
 
@@ -25,6 +33,7 @@ export function Screen({
   edgeToEdge = false,
   contentContainerStyle,
   background = 'default',
+  refreshControl,
   testID,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
@@ -50,6 +59,7 @@ export function Screen({
         contentContainerStyle={[styles.grow, padding, contentContainerStyle]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
       >
         {children}
       </ScrollView>
