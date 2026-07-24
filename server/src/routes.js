@@ -91,6 +91,16 @@ async function verifyLivenessToken(token, { purpose = 'generic', userId = null }
 const identityMatchEnabled = () => (process.env.EVERIFY_IDENTITY_MATCH || 'on').toLowerCase() !== 'off';
 const getLivenessThreshold = () => Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
 
+// Surface the single most dangerous misconfiguration at boot: with identity
+// matching off, Face Liveness proves only that *a* live person is present, so
+// ANY face passes for an account. That is the "different faces still pass"
+// symptom — make it impossible to run production this way without a warning.
+if (!identityMatchEnabled()) {
+  console.warn(
+    '[identity] EVERIFY_IDENTITY_MATCH is OFF — Face Liveness will accept ANY live face for an account (no identity binding). Set EVERIFY_IDENTITY_MATCH=on before production.',
+  );
+}
+
 /**
  * Prove that the person in front of the camera is the account holder — not just
  * that they are alive. First the Face Liveness anti-spoof gate, then eVerify's
