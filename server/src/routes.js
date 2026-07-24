@@ -967,14 +967,24 @@ api.get(
   '/follow-up/ice',
   requireAuth,
   wrap(async (_req, res) => {
-    const iceServers = [{ urls: (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',') }];
-    if (process.env.TURN_URL) {
+    const defaultStun = 'stun:stun.l.google.com:19302';
+    const stunString = process.env.STUN_URLS || defaultStun;
+    
+    const iceServers = [{ 
+      urls: stunString.split(','),
+      url: stunString.split(',')[0] // Fallback for strict/older native clients
+    }];
+
+    // Strict safety check: ONLY push TURN if the env vars are actually loaded
+    if (process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_PASSWORD) {
       iceServers.push({
         urls: process.env.TURN_URL.split(','),
-        username: process.env.TURN_USERNAME || undefined,
-        credential: process.env.TURN_PASSWORD || undefined,
+        url: process.env.TURN_URL.split(',')[0], // Fallback for strict/older native clients
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_PASSWORD,
       });
     }
+
     res.json({ iceServers });
   }),
 );
