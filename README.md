@@ -316,6 +316,7 @@ agapai/
 - [x] Encrypted PII vault + operator decrypt tool
 - [x] Voice assistant with local transcript history
 - [x] Next.js + shadcn admin with live charts & user management
+- [x] E2E-encrypted doctor follow-ups (chat + WebRTC calls, 7-day retention) — see [`docs/follow-ups.md`](docs/follow-ups.md)
 - [ ] Push notifications alongside SMS
 - [ ] Multi-language assistant voices
 - [ ] FHIR export of a patient's own record

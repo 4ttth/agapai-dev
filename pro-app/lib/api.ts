@@ -31,6 +31,11 @@ export interface ProUser {
   mobile?: string | null;
   prcLicense?: string | null;
   verified: boolean;
+  publicKey?: string | null;
+  /** Doctor opt-in: allow follow-up chat with the most recent patient. */
+  followUpChat?: boolean;
+  /** Doctor opt-in: allow follow-up calls with the most recent patient. */
+  followUpCall?: boolean;
 }
 
 export interface Session {
@@ -57,6 +62,11 @@ export async function saveSession(s: Session | null): Promise<void> {
   currentToken = s?.token ?? null;
   if (s) await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(s));
   else await AsyncStorage.removeItem(SESSION_KEY);
+}
+
+/** The active bearer token — the follow-up WebSocket authenticates with it. */
+export function getCurrentToken(): string | null {
+  return currentToken;
 }
 
 export async function api<T>(
@@ -137,3 +147,108 @@ export interface ConsultationRow {
   doctor?: { firstName: string; lastName: string; prcLicense?: string | null };
   patient?: { firstName: string; lastName: string; bloodType?: string | null };
 }
+
+// ---------- Follow-ups (doctor side) ----------
+
+export interface FollowUpCounterpart {
+  id: string;
+  role: 'PATIENT' | Role;
+  firstName: string;
+  lastName: string;
+  prcLicense?: string | null;
+}
+
+export interface FollowUpThread {
+  id: string;
+  status: 'OPEN' | 'CLOSED';
+  consultationId?: string | null;
+  createdAt: string;
+  lastMessageAt: string;
+  expiresAt: string;
+  closedAt?: string | null;
+  messageCount?: number;
+  counterpart: FollowUpCounterpart | null;
+}
+
+export interface FollowUpMessageRow {
+  id: string;
+  threadId: string;
+  senderId: string;
+  senderRole: 'PATIENT' | Role;
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  createdAt: string;
+}
+
+export interface FollowUpShareRow {
+  id: string;
+  threadId: string;
+  kind: 'CONSULTATION' | 'AI_HISTORY';
+  label?: string | null;
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  createdAt: string;
+}
+
+export interface SealedThreadKey {
+  wrappedKey: string;
+  wrapNonce: string;
+  wrapEphemPub: string;
+}
+
+export interface EncryptedBlob {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+}
+
+export interface IceServerConfig {
+  iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }>;
+}
+
+/** Decrypted follow-up message body. */
+export interface FollowUpMessageBody {
+  text: string;
+}
+
+/** Decrypted CONSULTATION share payload. */
+export interface SharedConsultationPayload {
+  date?: string;
+  type?: string;
+  doctorName?: string;
+  description: string;
+  prescriptions: Array<{ name: string; dosage: string; times: string[]; quantity?: number; instructions?: string }>;
+  hasVoice?: boolean;
+  voiceB64?: string;
+}
+
+/** Decrypted AI_HISTORY share payload. */
+export interface SharedAiHistoryPayload {
+  conversations: Array<{
+    startedAt: string;
+    mode: 'text' | 'voice';
+    messages: Array<{ who: 'user' | 'ai'; text: string }>;
+  }>;
+}
+
+export const followUpApi = {
+  publishPublicKey: (publicKey: string) => api<{ ok: boolean }>('/keys/public', { body: { publicKey } }),
+  publishPushToken: (pushToken: string, platform?: string) =>
+    api<{ ok: boolean }>('/keys/push-token', { body: { pushToken, platform } }),
+  ringCall: (id: string) =>
+    api<{ ok: boolean; callId: string; rang: boolean }>(`/follow-up/threads/${id}/call`, { body: {} }),
+  updateSettings: (input: { followUpChat?: boolean; followUpCall?: boolean }) =>
+    api<{ user: ProUser }>('/users/me', { method: 'PATCH', body: input }),
+  list: () => api<{ threads: FollowUpThread[] }>('/follow-up/threads'),
+  get: (id: string) =>
+    api<{ thread: FollowUpThread; wrap: SealedThreadKey | null; shares: FollowUpShareRow[] }>(
+      `/follow-up/threads/${id}`,
+    ),
+  messages: (id: string) => api<{ messages: FollowUpMessageRow[] }>(`/follow-up/threads/${id}/messages`),
+  send: (id: string, blob: EncryptedBlob) =>
+    api<{ message: FollowUpMessageRow }>(`/follow-up/threads/${id}/messages`, { body: blob }),
+  close: (id: string) => api<{ thread: FollowUpThread }>(`/follow-up/threads/${id}/close`, { body: {} }),
+  ice: () => api<IceServerConfig>('/follow-up/ice'),
+};

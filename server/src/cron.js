@@ -86,7 +86,23 @@ export async function runSmsSweep() {
   }
 }
 
+/**
+ * Purge expired follow-up threads. Each thread lives at most 7 days (see the
+ * FollowUpThread model); deleting it cascades to its messages and shares, so a
+ * follow-up never costs more than a week of storage. Runs hourly.
+ */
+export async function purgeExpiredFollowUps() {
+  const { count } = await prisma.followUpThread.deleteMany({
+    where: { expiresAt: { lt: new Date() } },
+  });
+  if (count > 0) console.log(`[follow-up] purged ${count} expired thread(s)`);
+}
+
 export function startCron() {
   cron.schedule('*/5 * * * *', () => runSmsSweep().catch((e) => console.error('[sms] sweep error', e)));
+  cron.schedule('7 * * * *', () =>
+    purgeExpiredFollowUps().catch((e) => console.error('[follow-up] purge error', e)),
+  );
   console.log('[cron] SMS reminder sweep scheduled every 5 minutes');
+  console.log('[cron] follow-up retention purge scheduled hourly');
 }

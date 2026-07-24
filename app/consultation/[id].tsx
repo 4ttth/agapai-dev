@@ -185,6 +185,19 @@ export default function ConsultationDetailScreen() {
           />
         ) : null}
       </Card>
+
+      <View style={styles.followUp}>
+        <Button
+          label="Ask a follow-up"
+          variant="secondary"
+          icon={<Ionicons name="chatbubbles" size={20} color={colors.primary} />}
+          onPress={() => router.push(`/follow-up/start?consultationId=${row.id}` as never)}
+          accessibilityHint="Chat with your most recent doctor about this visit"
+        />
+        <AppText variant="caption" color="muted" center style={styles.followUpHint}>
+          Available with your most recent doctor, if they&apos;ve turned follow-ups on.
+        </AppText>
+      </View>
     </Screen>
   );
 }
@@ -206,6 +219,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rxImage: { width: '100%', height: 260, marginTop: spacing.lg, borderRadius: radii.md },
+  followUp: { marginTop: spacing.lg, gap: spacing.sm },
+  followUpHint: { paddingHorizontal: spacing.md },
   flex: { flex: 1 },
   autoAddedRow: {
     flexDirection: 'row',

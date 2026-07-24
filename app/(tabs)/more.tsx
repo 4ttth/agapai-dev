@@ -35,6 +35,12 @@ export default function MoreScreen() {
     },
     { icon: 'qr-code', label: 'My Health ID', sub: 'Show your QR to clinic staff', route: '/health-id' },
     {
+      icon: 'chatbubbles',
+      label: 'Doctor follow-ups',
+      sub: 'Chat or call your most recent doctor',
+      route: '/follow-up',
+    },
+    {
       icon: 'notifications',
       label: 'Notifications',
       sub: 'Consultations, dispensing, mood & medication reminders',

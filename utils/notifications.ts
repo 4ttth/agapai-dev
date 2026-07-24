@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
@@ -25,6 +26,37 @@ export function configureNotificationHandler(): void {
     }),
   });
   handlerConfigured = true;
+}
+
+/**
+ * Register for an Expo push token so follow-up calls can ring — and new
+ * messages can notify — even when the app is backgrounded or closed. Best-effort:
+ * returns null on web, without permission, or in an environment that can't mint
+ * a token (e.g. Expo Go without a projectId). A dev build is needed for real
+ * remote push. Also sets up the high-priority Android "calls" channel.
+ */
+export async function registerForPushToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+  try {
+    if (!(await requestNotificationPermission())) return null;
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('calls', {
+        name: 'Calls',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+        bypassDnd: false,
+      }).catch(() => undefined);
+    }
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (Constants as any).easConfig?.projectId;
+    const { data } = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+    return data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Ask for notification permission. Returns whether it is granted. */

@@ -7,6 +7,7 @@ import express from 'express';
 
 import { startCron } from './cron.js';
 import { prisma } from './db.js';
+import { attachFollowUpRelay } from './followup.js';
 import { attachLiveRelay } from './live.js';
 import { api } from './routes.js';
 
@@ -42,3 +43,4 @@ const server = app.listen(port, '0.0.0.0', () => {
   startCron();
 });
 attachLiveRelay(server);
+attachFollowUpRelay(server);

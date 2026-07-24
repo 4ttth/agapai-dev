@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
-import { api, type ConsultationRow } from '@/lib/api';
+import { api, followUpApi, type ConsultationRow } from '@/lib/api';
 import { useSession } from '@/lib/SessionContext';
 import { colors, radii, spacing } from '@/lib/theme';
 import { Banner, Btn, Card, T } from '@/lib/ui';
@@ -17,6 +17,24 @@ export default function DoctorHome() {
 
   const user = session?.user;
   const verified = user?.verified ?? false;
+  const [savingSetting, setSavingSetting] = useState<null | 'chat' | 'call'>(null);
+
+  const toggleFollowUp = useCallback(
+    async (which: 'chat' | 'call', value: boolean) => {
+      setSavingSetting(which);
+      try {
+        await followUpApi.updateSettings(
+          which === 'chat' ? { followUpChat: value } : { followUpCall: value },
+        );
+        await refresh();
+      } catch {
+        // ignore — the switch snaps back to the server value on refresh
+      } finally {
+        setSavingSetting(null);
+      }
+    },
+    [refresh],
+  );
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -87,6 +105,61 @@ export default function DoctorHome() {
         </T>
       </Pressable>
 
+      <Card style={styles.followCard}>
+        <View style={styles.row}>
+          <Ionicons name="chatbubbles" size={22} color={colors.primary} />
+          <View style={styles.flex}>
+            <T size={16} weight="700">
+              Patient follow-ups
+            </T>
+            <T size={13} color={colors.textSecondary}>
+              Let your most recent patient reach you after a visit.
+            </T>
+          </View>
+        </View>
+
+        <View style={styles.settingRow}>
+          <View style={styles.flex}>
+            <T size={15} weight="600">
+              Allow follow-up chat
+            </T>
+            <T size={12} color={colors.textMuted}>
+              End-to-end encrypted, auto-deletes after 7 days
+            </T>
+          </View>
+          <Switch
+            value={user.followUpChat ?? false}
+            disabled={savingSetting === 'chat'}
+            onValueChange={(v) => void toggleFollowUp('chat', v)}
+            trackColor={{ true: colors.primary, false: colors.borderStrong }}
+          />
+        </View>
+
+        <View style={styles.settingRow}>
+          <View style={styles.flex}>
+            <T size={15} weight="600">
+              Allow follow-up calls
+            </T>
+            <T size={12} color={colors.textMuted}>
+              Peer-to-peer voice (off by default)
+            </T>
+          </View>
+          <Switch
+            value={user.followUpCall ?? false}
+            disabled={savingSetting === 'call'}
+            onValueChange={(v) => void toggleFollowUp('call', v)}
+            trackColor={{ true: colors.primary, false: colors.borderStrong }}
+          />
+        </View>
+
+        <Btn
+          label="Open follow-ups"
+          kind="secondary"
+          onPress={() => router.push('/follow-ups')}
+          style={styles.followBtn}
+        />
+      </Card>
+
       <T size={17} weight="700" style={styles.sectionTitle}>
         My uploaded records
       </T>
@@ -147,6 +220,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   sectionTitle: { marginTop: spacing.md },
+  followCard: { gap: spacing.md },
+  settingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  followBtn: { marginTop: spacing.xs },
   uploadCard: { padding: spacing.lg },
   footerNote: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, justifyContent: 'center' },
 });

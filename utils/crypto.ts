@@ -61,3 +61,35 @@ export function decryptRecord(
     return null;
   }
 }
+
+/**
+ * Generic AES-256-CBC encrypt/decrypt of an arbitrary JSON payload with a raw
+ * key string. Used for follow-up messages and shared attachments, which are
+ * encrypted with a per-thread key rather than the patient's master key but
+ * follow the same SHA-256(key + salt) derivation.
+ */
+export async function encryptJson(payload: unknown, key: string): Promise<EncryptedRecord> {
+  const toHex = (arr: Uint8Array) =>
+    Array.from(arr)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  const salt = toHex(await Crypto.getRandomBytesAsync(16));
+  const ivHex = toHex(await Crypto.getRandomBytesAsync(16));
+  const iv = CryptoJS.enc.Hex.parse(ivHex);
+  const derived = CryptoJS.SHA256(key + salt);
+  const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(payload), derived, { iv }).toString();
+  return { ciphertext, iv: ivHex, salt };
+}
+
+export function decryptJson<T>(record: EncryptedRecord, key: string): T | null {
+  try {
+    const derived = CryptoJS.SHA256(key + record.salt);
+    const bytes = CryptoJS.AES.decrypt(record.ciphertext, derived, {
+      iv: CryptoJS.enc.Hex.parse(record.iv),
+    });
+    const text = bytes.toString(CryptoJS.enc.Utf8);
+    return text ? (JSON.parse(text) as T) : null;
+  } catch {
+    return null;
+  }
+}

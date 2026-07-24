@@ -3,8 +3,12 @@ import { createContext, useCallback, useEffect, useMemo, useState, type ReactNod
 import { serverApi } from '@/services/api/server';
 import { setAuthToken } from '@/services/api/http';
 import type { AgapaiSession, ServerUser, VerifiedIdentity } from '@/types';
+import { Platform } from 'react-native';
+
 import { makePatientKey } from '@/utils/crypto';
 import { getDeviceId } from '@/utils/device';
+import { getDeviceKeyPair } from '@/utils/followupKeys';
+import { registerForPushToken } from '@/utils/notifications';
 import { readJson, removeKeys, writeJson } from '@/utils/storage';
 
 const SESSION_KEY = 'agapai/session-v2';
@@ -105,6 +109,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           patientKey = undefined;
         }
       }
+      // Publish this device's follow-up public key so their doctor can seal a
+      // thread key to it. Best-effort — a follow-up just won't start until it
+      // succeeds, and it's retried on every sign-in.
+      try {
+        const { publicKey } = await getDeviceKeyPair();
+        if (user.publicKey !== publicKey) void serverApi.publishPublicKey(publicKey).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+
+      // Register a push token so a doctor's follow-up call rings in the background.
+      void registerForPushToken()
+        .then((token) => {
+          if (token) void serverApi.publishPushToken(token, Platform.OS).catch(() => {});
+        })
+        .catch(() => {});
+
       const next: AgapaiSession = { token, user, patientKey };
       await writeJson(SESSION_KEY, next);
       setSession(next);

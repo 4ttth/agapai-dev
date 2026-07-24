@@ -8,7 +8,11 @@ import {
   type ReactNode,
 } from 'react';
 
-import { api, loadSession, saveSession, type ProUser, type Role, type Session } from './api';
+import { Platform } from 'react-native';
+
+import { api, followUpApi, loadSession, saveSession, type ProUser, type Role, type Session } from './api';
+import { getDeviceKeyPair } from './followupKeys';
+import { registerForPushToken } from './notifications';
 
 export interface VerifiedIdentity {
   uniqid: string;
@@ -61,6 +65,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     });
   }, []);
+
+  // Publish this device's follow-up public key so patients can seal a thread key
+  // to it. Best-effort and idempotent; retried whenever the session id changes.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let active = true;
+    getDeviceKeyPair()
+      .then(({ publicKey }) => {
+        if (active && session.user.publicKey !== publicKey) void followUpApi.publishPublicKey(publicKey).catch(() => {});
+      })
+      .catch(() => {});
+    // Register a push token so a patient's follow-up call rings in the background.
+    void registerForPushToken()
+      .then((token) => {
+        if (active && token) void followUpApi.publishPushToken(token, Platform.OS).catch(() => {});
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id, session?.user?.publicKey]);
 
   const signIn = useCallback(async (qrValue: string) => {
     // scope PRO: resolve this National ID's professional account, not the
