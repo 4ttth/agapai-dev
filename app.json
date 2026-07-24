@@ -69,7 +69,8 @@
       [
         "expo-notifications",
         {
-          "color": "#0B4F9E"
+          "color": "#0B4F9E",
+          "sounds": ["./assets/sounds/agapai.wav"]
         }
       ],
       [
