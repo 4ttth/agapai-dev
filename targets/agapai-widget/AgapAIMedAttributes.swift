@@ -13,14 +13,16 @@ public struct AgapAIMedAttributes: ActivityAttributes {
     public var phase: String
     public var acknowledged: Bool
     public var taken: Bool
-    public var deadline: Date
+    public var deadlineEpoch: Double
 
-    public init(phase: String, acknowledged: Bool, taken: Bool, deadline: Date) {
+    public init(phase: String, acknowledged: Bool, taken: Bool, deadlineEpoch: Double) {
       self.phase = phase
       self.acknowledged = acknowledged
       self.taken = taken
-      self.deadline = deadline
+      self.deadlineEpoch = deadlineEpoch
     }
+
+    public var deadline: Date { Date(timeIntervalSince1970: deadlineEpoch) }
   }
 
   public var medicationId: String

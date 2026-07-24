@@ -962,6 +962,71 @@ api.post(
   }),
 );
 
+// ---------- Medication Live Activities (iOS) ----------
+
+/**
+ * Register this device's ActivityKit push-to-start token so the cron can start
+ * medication Live Activities over APNs while the app is closed (iOS 17.2+).
+ */
+api.post(
+  '/live-activity/token',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { pushToStartToken } = req.body || {};
+    if (!pushToStartToken) return res.status(422).json({ error: 'pushToStartToken required' });
+    await prisma.user.update({
+      where: { id: req.auth.id },
+      data: { liveActivityToken: String(pushToStartToken) },
+    });
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * Report a running activity's per-activity update token (delivered to the app by
+ * ActivityKit while it runs) so the server can end it later. Best-effort: stored
+ * on today's non-ended sessions for this patient+medication.
+ */
+api.post(
+  '/live-activity/activity-token',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { medicationId, updateToken } = req.body || {};
+    if (!medicationId || !updateToken) {
+      return res.status(422).json({ error: 'medicationId and updateToken required' });
+    }
+    await prisma.liveActivitySession.updateMany({
+      where: { patientId: req.auth.id, medicationId: String(medicationId), phase: { not: 'ended' } },
+      data: { updateToken: String(updateToken) },
+    });
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * Note a dose confirmed from a Live Activity ("I already took it"). Called by the
+ * widget's App Intent with the patient's bearer token. Marks the matching
+ * sessions taken so the sweep stops nudging; the activity itself is dismissed by
+ * the intent, and the app reconciles its local dose log from the App Group queue.
+ */
+api.post(
+  '/live-activity/taken',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { medicationId } = req.body || {};
+    if (!medicationId) return res.status(422).json({ error: 'medicationId required' });
+    await prisma.liveActivitySession.updateMany({
+      where: {
+        patientId: req.auth.id,
+        medicationId: String(medicationId),
+        phase: { not: 'ended' },
+      },
+      data: { taken: true },
+    });
+    res.json({ ok: true });
+  }),
+);
+
 /** WebRTC ICE servers for a follow-up call. STUN is free; TURN is optional. */
 api.get(
   '/follow-up/ice',

@@ -87,7 +87,7 @@ struct AcknowledgeMedIntent: LiveActivityIntent {
     if let activity = AgapAIIntentSupport.activity(for: medicationId) {
       let s = activity.content.state
       let next = AgapAIMedAttributes.ContentState(
-        phase: s.phase, acknowledged: true, taken: s.taken, deadline: s.deadline
+        phase: s.phase, acknowledged: true, taken: s.taken, deadlineEpoch: s.deadlineEpoch
       )
       await activity.update(ActivityContent(state: next, staleDate: s.deadline.addingTimeInterval(600)))
     }
@@ -119,7 +119,7 @@ struct MarkTakenMedIntent: LiveActivityIntent {
     if let activity = AgapAIIntentSupport.activity(for: medicationId) {
       let s = activity.content.state
       let confirmed = AgapAIMedAttributes.ContentState(
-        phase: s.phase, acknowledged: s.acknowledged, taken: true, deadline: s.deadline
+        phase: s.phase, acknowledged: s.acknowledged, taken: true, deadlineEpoch: s.deadlineEpoch
       )
       await activity.update(ActivityContent(state: confirmed, staleDate: nil))
       // Leave the confirmation visible briefly, then dismiss.

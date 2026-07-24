@@ -89,7 +89,7 @@ public class AgapaiLiveActivityModule: Module {
           phase: payload["phase"] as? String ?? "upcoming",
           acknowledged: false,
           taken: false,
-          deadline: Self.deadline(from: payload["deadlineEpoch"])
+          deadlineEpoch: Self.epoch(from: payload["deadlineEpoch"])
         )
         let content = ActivityContent(state: state, staleDate: state.deadline.addingTimeInterval(600))
         let activity = try Activity.request(
@@ -114,7 +114,7 @@ public class AgapaiLiveActivityModule: Module {
           phase: payload["phase"] as? String ?? activity.content.state.phase,
           acknowledged: payload["acknowledged"] as? Bool ?? activity.content.state.acknowledged,
           taken: payload["taken"] as? Bool ?? activity.content.state.taken,
-          deadline: Self.deadline(from: payload["deadlineEpoch"], fallback: activity.content.state.deadline)
+          deadlineEpoch: Self.epoch(from: payload["deadlineEpoch"], fallback: activity.content.state.deadlineEpoch)
         )
         await activity.update(ActivityContent(state: state, staleDate: state.deadline.addingTimeInterval(600)))
       }
@@ -205,9 +205,9 @@ public class AgapaiLiveActivityModule: Module {
 
   // MARK: - Helpers
 
-  private static func deadline(from value: Any?, fallback: Date = Date().addingTimeInterval(300)) -> Date {
-    if let epoch = value as? Double { return Date(timeIntervalSince1970: epoch) }
-    if let epoch = value as? Int { return Date(timeIntervalSince1970: Double(epoch)) }
+  private static func epoch(from value: Any?, fallback: Double = Date().addingTimeInterval(300).timeIntervalSince1970) -> Double {
+    if let epoch = value as? Double { return epoch }
+    if let epoch = value as? Int { return Double(epoch) }
     return fallback
   }
 }

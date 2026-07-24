@@ -21,16 +21,20 @@ public struct AgapAIMedAttributes: ActivityAttributes {
     /// True once the dose is marked taken from the activity (from the "I already
     /// took it" button). Drives the confirmation state before the activity ends.
     public var taken: Bool
-    /// Countdown target shown as a live timer: the dose time (upcoming phase) or
-    /// the end of the 5-minute answer window (due phase).
-    public var deadline: Date
+    /// Countdown target as Unix epoch seconds — the dose time (upcoming phase) or
+    /// the end of the 5-minute answer window (due phase). Kept as a number (not a
+    /// Swift `Date`) so it encodes unambiguously over APNs push updates.
+    public var deadlineEpoch: Double
 
-    public init(phase: String, acknowledged: Bool, taken: Bool, deadline: Date) {
+    public init(phase: String, acknowledged: Bool, taken: Bool, deadlineEpoch: Double) {
       self.phase = phase
       self.acknowledged = acknowledged
       self.taken = taken
-      self.deadline = deadline
+      self.deadlineEpoch = deadlineEpoch
     }
+
+    /// The countdown target as a `Date` for SwiftUI timers.
+    public var deadline: Date { Date(timeIntervalSince1970: deadlineEpoch) }
   }
 
   /// Stable identity of the dose this activity is about (set once at start).
