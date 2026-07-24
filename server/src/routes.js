@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { bus } from './bus.js';
 import { prisma } from './db.js';
+import { sendExpoPush } from './push.js';
 import {
   aiAssistant,
   aiCredits,
@@ -869,6 +870,21 @@ api.post(
   }),
 );
 
+/** Register this device's Expo push token so calls can ring in the background. */
+api.post(
+  '/keys/push-token',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { pushToken, platform } = req.body || {};
+    if (!pushToken) return res.status(422).json({ error: 'pushToken required' });
+    await prisma.user.update({
+      where: { id: req.auth.id },
+      data: { pushToken, pushPlatform: platform ? String(platform).slice(0, 16) : null },
+    });
+    res.json({ ok: true });
+  }),
+);
+
 /** WebRTC ICE servers for a follow-up call. STUN is free; TURN is optional. */
 api.get(
   '/follow-up/ice',
@@ -1077,7 +1093,72 @@ api.post(
       .update({ where: { id: thread.id }, data: { lastMessageAt: message.createdAt } })
       .catch(() => {});
     bus.emit('followup:message', { threadId: thread.id, message });
+
+    // Nudge the recipient by push (best-effort). The body is generic — the
+    // message itself is end-to-end encrypted and never leaves the two devices.
+    const recipientIsDoctor = senderRole === 'PATIENT';
+    const senderName = recipientIsDoctor
+      ? `${thread.patient.firstName} ${thread.patient.lastName}`.replace(/\s+/g, ' ').trim()
+      : `Dr. ${thread.doctor.firstName} ${thread.doctor.lastName}`.replace(/\s+/g, ' ').trim();
+    const recipientId = recipientIsDoctor ? thread.doctorId : thread.patientId;
+    prisma.user
+      .findUnique({ where: { id: recipientId }, select: { pushToken: true } })
+      .then((r) => {
+        if (r?.pushToken)
+          void sendExpoPush(r.pushToken, {
+            title: 'New follow-up message',
+            body: `${senderName} sent you a message.`,
+            data: { kind: 'follow-up-message', threadId: thread.id },
+          });
+      })
+      .catch(() => {});
+
     res.json({ message });
+  }),
+);
+
+/**
+ * Ring the other participant for a WebRTC call: sends them a push notification
+ * so the call rings even when their app is backgrounded or closed. Either side
+ * may initiate (patient → doctor or doctor → patient), but only while the
+ * thread's doctor has follow-up calls enabled.
+ */
+api.post(
+  '/follow-up/threads/:id/call',
+  requireAuth,
+  wrap(async (req, res) => {
+    const thread = await loadParticipantThread(req, res);
+    if (!thread) return;
+    if (thread.status !== 'OPEN') return res.status(409).json({ error: 'This follow-up is closed.' });
+
+    const doctor = await prisma.user.findUnique({
+      where: { id: thread.doctorId },
+      select: { followUpCall: true },
+    });
+    if (!doctor?.followUpCall)
+      return res.status(403).json({ error: 'Calls are not enabled for this follow-up.' });
+
+    const callerIsDoctor = req.auth.id === thread.doctorId;
+    const callerName = callerIsDoctor
+      ? `Dr. ${thread.doctor.firstName} ${thread.doctor.lastName}`.replace(/\s+/g, ' ').trim()
+      : `${thread.patient.firstName} ${thread.patient.lastName}`.replace(/\s+/g, ' ').trim();
+    const calleeId = callerIsDoctor ? thread.patientId : thread.doctorId;
+
+    const callee = await prisma.user.findUnique({
+      where: { id: calleeId },
+      select: { pushToken: true },
+    });
+
+    const callId = `${thread.id}-${Date.now()}`;
+    if (callee?.pushToken) {
+      void sendExpoPush(callee.pushToken, {
+        title: 'Incoming AgapAI call',
+        body: `${callerName} is calling you…`,
+        data: { kind: 'follow-up-call', threadId: thread.id, callId },
+        channelId: 'calls',
+      });
+    }
+    res.json({ ok: true, callId, rang: !!callee?.pushToken });
   }),
 );
 

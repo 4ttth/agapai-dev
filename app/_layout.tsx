@@ -54,9 +54,14 @@ function useNotificationRouting() {
   const router = useRouter();
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const kind = response.notification.request.content.data?.kind;
+      const data = response.notification.request.content.data ?? {};
+      const kind = data.kind;
       if (kind === 'medication-reminder') router.push('/(tabs)/medications');
       else if (kind === 'mood-reminder') router.push('/(tabs)');
+      else if (kind === 'follow-up-call' && data.threadId)
+        router.push(`/follow-up/call/${data.threadId}?mode=callee` as never);
+      else if (kind === 'follow-up-message' && data.threadId)
+        router.push(`/follow-up/${data.threadId}` as never);
     });
     return () => sub.remove();
   }, [router]);

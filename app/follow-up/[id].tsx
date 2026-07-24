@@ -99,7 +99,7 @@ export default function FollowUpChatScreen() {
         </View>
         {callEnabled && !closed ? (
           <Pressable
-            onPress={() => router.push(`/follow-up/call/${id}` as never)}
+            onPress={() => router.push(`/follow-up/call/${id}?mode=caller` as never)}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="Call doctor"

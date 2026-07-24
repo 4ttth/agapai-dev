@@ -47,6 +47,7 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
   const pcRef = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
   const startedRef = useRef(false);
+  const offeredRef = useRef(false);
 
   const cleanup = useCallback(() => {
     try {
@@ -141,9 +142,12 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'join', threadId }));
+        setState('ringing');
         if (initiator) {
-          setState('ringing');
+          // Ring the peer over the socket (instant, if they're connected) AND
+          // via push (so it rings when their app is backgrounded or closed).
           ws.send(JSON.stringify({ type: 'call-invite', threadId }));
+          void serverApi.ringFollowUpCall(threadId).catch(() => {});
         }
       };
 
@@ -161,6 +165,9 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
         } else if (msg.type === 'call-decline' || msg.type === 'call-end') {
           hangUp();
         } else if (msg.type === 'call-accept' && initiator) {
+          if (offeredRef.current) return; // one offer per call, even if accepted twice
+          offeredRef.current = true;
+          setState('connecting');
           const offer = await pc.createOffer({});
           await pc.setLocalDescription(offer);
           ws.send(JSON.stringify({ type: 'signal', threadId, kind: 'offer', sdp: pc.localDescription }));

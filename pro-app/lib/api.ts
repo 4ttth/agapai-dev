@@ -235,6 +235,10 @@ export interface SharedAiHistoryPayload {
 
 export const followUpApi = {
   publishPublicKey: (publicKey: string) => api<{ ok: boolean }>('/keys/public', { body: { publicKey } }),
+  publishPushToken: (pushToken: string, platform?: string) =>
+    api<{ ok: boolean }>('/keys/push-token', { body: { pushToken, platform } }),
+  ringCall: (id: string) =>
+    api<{ ok: boolean; callId: string; rang: boolean }>(`/follow-up/threads/${id}/call`, { body: {} }),
   updateSettings: (input: { followUpChat?: boolean; followUpCall?: boolean }) =>
     api<{ user: ProUser }>('/users/me', { method: 'PATCH', body: input }),
   list: () => api<{ threads: FollowUpThread[] }>('/follow-up/threads'),

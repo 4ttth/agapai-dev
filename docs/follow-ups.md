@@ -95,6 +95,31 @@ that without hand-rolling raw UDP**, which is why it's the design here:
   `GET /api/follow-up/ice`.
 - **Clients** — `useWebRtcCall` (both apps) does the full offer/answer/ICE
   exchange and a mute/hang-up call UI, gated behind `followUpCall`.
+- **Either side can call.** Patient → doctor **and** doctor → patient. The call
+  screen takes a `mode` param: `caller` (the initiator, from the chat "Call"
+  button) or `callee` (the answerer, from a tapped incoming-call notification).
+
+### Background incoming calls (push)
+
+A call rings even when the callee's app is backgrounded or closed:
+
+1. Each device registers an **Expo push token** on sign-in
+   (`POST /api/keys/push-token`, stored on `User.pushToken`).
+2. When the caller opens the call screen it hits
+   `POST /api/follow-up/threads/:id/call`, which **pushes** the callee
+   (`kind: 'follow-up-call'`, high priority, Android `calls` channel) *and*
+   sends a `call-invite` over the socket for an already-connected peer.
+3. Tapping the notification opens the call screen as `mode=callee`, showing
+   **Answer / Decline**. Answer → `call-accept` → the caller sends its offer →
+   answer/ICE → connected.
+
+New follow-up messages also push the recipient (`kind: 'follow-up-message'`);
+the body is generic since the message itself is end-to-end encrypted.
+
+> Push requires a **dev build** and, for the doctor app, its own EAS
+> `projectId` in `pro-app/app.json` (`extra.eas.projectId`). Registration is
+> best-effort and no-ops in Expo Go, so chat and everything else still work
+> there. The `expo-notifications` plugin is wired into both `app.json` files.
 
 ### What you must provision for calls
 
@@ -127,19 +152,22 @@ that without hand-rolling raw UDP**, which is why it's the design here:
 ### Call flow (signaling)
 
 ```
-patient (initiator)                server (/ws/follow-up)                doctor
-  join ───────────────────────────────► room ◄─────────────────────────── join
+caller                             server                                callee
+  POST /follow-up/threads/:id/call ──► push ─────────────────────────►  (rings)
+  join ───────────────────────────────► room                    (taps notif) join
   call-invite ─────────────────────────────────────────────────────────►  (ring)
-                                                             ◄──────── call-accept
+                                                        (Answer) ◄──── call-accept
   offer (SDP) ─────────────────────────────────────────────────────────►
                                                              ◄──────────── answer
   ICE candidates ◄───────────────── relayed both ways ─────────────────► ICE
   = = = = = = = = =  media: peer-to-peer UDP, DTLS-SRTP  = = = = = = = = = = = =
 ```
 
+Either role can be the caller — the diagram is symmetric.
+
 ### Future hardening (not built yet)
 
-- **Background incoming calls** need push notifications (CallKit / Connection
-  service). Today a call connects when both parties are on the call screen.
+- **Full-screen CallKit / ConnectionService UI** for a native incoming-call
+  screen (lock-screen answer). Today the push opens the in-app call screen.
 - Optional call **audit metadata** (start/end timestamps) if a compliance trail
   is required — kept minimal to preserve the privacy posture.

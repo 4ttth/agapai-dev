@@ -8,8 +8,11 @@ import {
   type ReactNode,
 } from 'react';
 
+import { Platform } from 'react-native';
+
 import { api, followUpApi, loadSession, saveSession, type ProUser, type Role, type Session } from './api';
 import { getDeviceKeyPair } from './followupKeys';
+import { registerForPushToken } from './notifications';
 
 export interface VerifiedIdentity {
   uniqid: string;
@@ -71,6 +74,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     getDeviceKeyPair()
       .then(({ publicKey }) => {
         if (active && session.user.publicKey !== publicKey) void followUpApi.publishPublicKey(publicKey).catch(() => {});
+      })
+      .catch(() => {});
+    // Register a push token so a patient's follow-up call rings in the background.
+    void registerForPushToken()
+      .then((token) => {
+        if (active && token) void followUpApi.publishPushToken(token, Platform.OS).catch(() => {});
       })
       .catch(() => {});
     return () => {

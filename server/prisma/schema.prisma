@@ -67,6 +67,13 @@ model User {
    * a follow-up CALL (WebRTC). Off by default and independent of chat.
    */
   followUpCall   Boolean @default(false)
+  /**
+   * Expo push token for this device, so a follow-up call can RING and a new
+   * message can notify even when the app is backgrounded or closed. Best-effort;
+   * refreshed on sign-in.
+   */
+  pushToken      String?
+  pushPlatform   String?
   createdAt      DateTime @default(now())
 
   consultationsAsPatient Consultation[] @relation("patient")

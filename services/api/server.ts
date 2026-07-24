@@ -172,6 +172,16 @@ export const serverApi = {
     return api<{ ok: boolean }>('/keys/public', { body: { publicKey } });
   },
 
+  /** Register this device's Expo push token so calls can ring in the background. */
+  publishPushToken(pushToken: string, platform?: string) {
+    return api<{ ok: boolean }>('/keys/push-token', { body: { pushToken, platform } });
+  },
+
+  /** Ring the other participant for a call (push + live). */
+  ringFollowUpCall(id: string) {
+    return api<{ ok: boolean; callId: string; rang: boolean }>(`/follow-up/threads/${id}/call`, { body: {} });
+  },
+
   /** Who the patient may follow up with (their most recent doctor) + pubkey. */
   followUpEligibility() {
     return api<FollowUpEligibility>('/follow-up/eligibility');

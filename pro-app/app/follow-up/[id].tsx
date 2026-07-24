@@ -133,7 +133,7 @@ export default function ProFollowUpChatScreen() {
         </View>
         {callEnabled && !closed ? (
           <Pressable
-            onPress={() => router.push(`/follow-up/call/${id}`)}
+            onPress={() => router.push(`/follow-up/call/${id}?mode=caller`)}
             hitSlop={12}
             style={styles.iconBtn}
             accessibilityRole="button"

@@ -16,11 +16,15 @@ const LABEL: Record<CallState, string> = {
   error: 'Call unavailable',
 };
 
-/** Patient-initiated follow-up voice call (WebRTC, peer-to-peer over UDP). */
+/** Follow-up voice call (WebRTC, peer-to-peer over UDP). Caller or callee. */
 export default function FollowUpCallScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, mode } = useLocalSearchParams<{ id: string; mode?: string }>();
   const router = useRouter();
-  const { state, error, muted, start, hangUp, toggleMute } = useWebRtcCall({ threadId: id, initiator: true });
+  const isCaller = mode !== 'callee';
+  const { state, error, muted, start, accept, decline, hangUp, toggleMute } = useWebRtcCall({
+    threadId: id,
+    initiator: isCaller,
+  });
 
   useEffect(() => {
     void start();
@@ -40,7 +44,7 @@ export default function FollowUpCallScreen() {
           <Ionicons name="call" size={44} color={colors.onPrimary} />
         </View>
         <AppText variant="title" color="inverse" center style={styles.state}>
-          {LABEL[state]}
+          {!isCaller && state === 'ringing' ? 'Incoming call…' : LABEL[state]}
         </AppText>
         {error ? (
           <AppText variant="body" color="inverse" center style={styles.error}>
@@ -54,27 +58,53 @@ export default function FollowUpCallScreen() {
       </View>
 
       <View style={styles.controls}>
-        {state !== 'error' && state !== 'ended' ? (
-          <Pressable
-            onPress={toggleMute}
-            style={[styles.control, muted && styles.controlActive]}
-            accessibilityRole="button"
-            accessibilityLabel={muted ? 'Unmute' : 'Mute'}
-          >
-            <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color={colors.onPrimary} />
-          </Pressable>
-        ) : null}
-        <Pressable
-          onPress={() => {
-            hangUp();
-            router.back();
-          }}
-          style={[styles.control, styles.hangup]}
-          accessibilityRole="button"
-          accessibilityLabel="End call"
-        >
-          <Ionicons name="call" size={26} color={colors.onPrimary} style={styles.hangIcon} />
-        </Pressable>
+        {!isCaller && state === 'ringing' ? (
+          <>
+            <Pressable
+              onPress={() => {
+                decline();
+                router.back();
+              }}
+              style={[styles.control, styles.hangup]}
+              accessibilityRole="button"
+              accessibilityLabel="Decline call"
+            >
+              <Ionicons name="call" size={26} color={colors.onPrimary} style={styles.hangIcon} />
+            </Pressable>
+            <Pressable
+              onPress={accept}
+              style={[styles.control, styles.answer]}
+              accessibilityRole="button"
+              accessibilityLabel="Answer call"
+            >
+              <Ionicons name="call" size={26} color={colors.onPrimary} />
+            </Pressable>
+          </>
+        ) : (
+          <>
+            {state !== 'error' && state !== 'ended' ? (
+              <Pressable
+                onPress={toggleMute}
+                style={[styles.control, muted && styles.controlActive]}
+                accessibilityRole="button"
+                accessibilityLabel={muted ? 'Unmute' : 'Mute'}
+              >
+                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color={colors.onPrimary} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => {
+                hangUp();
+                router.back();
+              }}
+              style={[styles.control, styles.hangup]}
+              accessibilityRole="button"
+              accessibilityLabel="End call"
+            >
+              <Ionicons name="call" size={26} color={colors.onPrimary} style={styles.hangIcon} />
+            </Pressable>
+          </>
+        )}
       </View>
     </View>
   );
@@ -105,5 +135,6 @@ const styles = StyleSheet.create({
   },
   controlActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
   hangup: { backgroundColor: colors.danger },
+  answer: { backgroundColor: colors.success },
   hangIcon: { transform: [{ rotate: '135deg' }] },
 });
