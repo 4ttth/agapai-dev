@@ -69,6 +69,13 @@ export function getCurrentToken(): string | null {
   return currentToken;
 }
 
+type UnauthorizedCallback = (msg: string) => void;
+let unauthorizedListener: UnauthorizedCallback | null = null;
+
+export function setOnUnauthorized(cb: UnauthorizedCallback | null) {
+  unauthorizedListener = cb;
+}
+
 export async function api<T>(
   path: string,
   options: { method?: string; body?: unknown; timeoutMs?: number } = {},
@@ -86,7 +93,15 @@ export async function api<T>(
       signal: ctrl.signal,
     });
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
-    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+    if (!res.ok) {
+      const msg = data.error ?? `Request failed (${res.status})`;
+      if (res.status === 401 || msg.includes('logged out') || msg.includes('no account found')) {
+        if (unauthorizedListener) {
+          unauthorizedListener(msg);
+        }
+      }
+      throw new Error(msg);
+    }
     return data as T;
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError')

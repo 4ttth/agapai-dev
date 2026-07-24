@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +54,7 @@ export default function HomeScreen() {
     displayStatusOf,
     now,
     remindersEnabled,
+    refresh,
   } = useMedications();
 
   const [moods, setMoods] = useState<MoodMap>({});
@@ -61,19 +62,28 @@ export default function HomeScreen() {
   const [dispensed, setDispensed] = useState<Array<{ id: string; name: string; quantity?: number | null; createdAt: string }>>([]);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadHomeData = useCallback(() => {
     void readMoods().then(setMoods);
-    serverApi
-      .listConsultations()
-      .then(({ consultations: list }) => setConsultations(list.slice(0, 2)))
-      .catch(() => {});
-    serverApi
-      .serverMedications()
-      .then(({ medications: list }) =>
-        setDispensed(list.filter((m) => m.source === 'PHARMACIST').slice(0, 3)),
-      )
-      .catch(() => {});
-  }, []);
+    if (session?.token) {
+      serverApi
+        .listConsultations()
+        .then(({ consultations: list }) => setConsultations(list.slice(0, 2)))
+        .catch(() => {});
+      serverApi
+        .serverMedications()
+        .then(({ medications: list }) =>
+          setDispensed(list.filter((m) => m.source === 'PHARMACIST').slice(0, 3)),
+        )
+        .catch(() => {});
+    }
+  }, [session?.token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadHomeData();
+      void refresh();
+    }, [loadHomeData, refresh]),
+  );
 
   useEffect(() => {
     if (!confirmation) return;

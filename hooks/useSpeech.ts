@@ -101,8 +101,9 @@ export function useSpeech() {
         ctxRef.current = ctx;
         sourceRef.current = source;
         source.start(0);
-      } catch {
+      } catch (err) {
         if (gen !== genRef.current) return;
+        console.warn('[useSpeech] Gemini TTS failed, falling back to device voice:', err);
         // Gemini TTS unavailable — fall back to the built-in device voice.
         speakOnDevice(clean);
       }

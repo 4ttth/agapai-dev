@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useAuth } from '@/hooks/useAuth';
 import { services } from '@/services';
 import type { AsyncStatus, DoseLog, Medication, NewMedicationInput } from '@/types';
 import { todayString } from '@/utils/datetime';
@@ -36,6 +37,10 @@ export const MedicationContext = createContext<MedicationContextValue | undefine
  * persists via AsyncStorage, and keeps local reminders in sync with schedules.
  */
 export function MedicationProvider({ children }: { children: ReactNode }) {
+  const auth = useAuth();
+  const authStatus = auth.status;
+  const token = auth.session?.token;
+
   const [status, setStatus] = useState<AsyncStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
@@ -63,9 +68,13 @@ export function MedicationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (authStatus === 'initializing') return;
     void load();
+  }, [authStatus, token, load]);
+
+  useEffect(() => {
     void requestNotificationPermission().then(setRemindersEnabled);
-  }, [load]);
+  }, []);
 
   // Reschedule medication reminders whenever the list changes, honouring the
   // patient's notification preferences (and preserving the mood reminder, which

@@ -725,7 +725,7 @@ api.post(
       const out = await synthesizeSpeech(text, { voice });
       return res.json(out);
     } catch (err) {
-      console.error('[tts] failed:', err.status, err.message);
+      console.error('[tts] failed:', err.status, err.message, err.body ? JSON.stringify(err.body) : '');
       return res.status(502).json({ error: 'Could not generate speech right now.' });
     }
   }),
@@ -779,8 +779,9 @@ api.post(
   '/consultations',
   requireAuth,
   wrap(async (req, res) => {
-    const doctor = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!doctor || doctor.role !== 'DOCTOR') return res.status(403).json({ error: 'Doctors only' });
+    const doctor = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!doctor) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (doctor.role !== 'DOCTOR') return res.status(403).json({ error: 'Doctors only' });
     if (!doctor.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const b = req.body;
     if (!b.patientId || !b.ciphertext || !b.iv || !b.salt || !b.type)
@@ -866,8 +867,9 @@ api.get(
   '/consultations/latest/:patientId',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
     if (!me.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const latest = await prisma.consultation.findFirst({
       where: { patientId: req.params.patientId },
@@ -1021,8 +1023,9 @@ api.get(
   '/follow-up/eligibility',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
     const recent = await mostRecentDoctorFor(me.id);
     if (!recent) return res.json({ eligible: false, reason: 'no-consultation' });
     const { doctor, consultationId } = recent;
@@ -1063,8 +1066,9 @@ api.post(
   '/follow-up/threads',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
     const b = req.body || {};
     const recent = await mostRecentDoctorFor(me.id);
     if (!recent) return res.status(403).json({ error: 'You have no consultation to follow up on yet.' });
@@ -1298,8 +1302,9 @@ api.post(
   '/dispense',
   requireAuth,
   wrap(async (req, res) => {
-    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
-    if (!me || me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
+    const me = req.user || (await prisma.user.findUnique({ where: { id: req.auth.id } }));
+    if (!me) return res.status(401).json({ error: 'You have been logged out or no account found for this ID' });
+    if (me.role !== 'PHARMACIST') return res.status(403).json({ error: 'Pharmacists only' });
     if (!me.verified) return res.status(403).json({ error: 'Awaiting admin verification' });
     const { patientId, consultationId, items } = req.body;
     if (!patientId || !Array.isArray(items) || items.length === 0)

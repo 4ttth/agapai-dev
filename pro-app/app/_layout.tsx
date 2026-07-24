@@ -7,20 +7,41 @@ import { SessionProvider } from '@/lib/SessionContext';
 import { configureNotificationHandler } from '@/lib/notifications';
 import { colors } from '@/lib/theme';
 
+import { Alert } from 'react-native';
+
 configureNotificationHandler();
 
-/** Route a tapped follow-up notification to the call or chat screen. */
+/** Route a tapped follow-up notification or foreground incoming call to the call or chat screen. */
 function useNotificationRouting() {
   const router = useRouter();
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subResponse = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data ?? {};
       if (data.kind === 'follow-up-call' && data.threadId)
         router.push(`/follow-up/call/${data.threadId}?mode=callee`);
       else if (data.kind === 'follow-up-message' && data.threadId)
         router.push(`/follow-up/${data.threadId}`);
     });
-    return () => sub.remove();
+
+    const subReceived = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data ?? {};
+      if (data.kind === 'follow-up-call' && data.threadId) {
+        const title = notification.request.content.title || 'Incoming Call';
+        const body = notification.request.content.body || 'Patient is calling you...';
+        Alert.alert(title, body, [
+          { text: 'Decline', style: 'cancel' },
+          {
+            text: 'Answer',
+            onPress: () => router.push(`/follow-up/call/${data.threadId}?mode=callee`),
+          },
+        ]);
+      }
+    });
+
+    return () => {
+      subResponse.remove();
+      subReceived.remove();
+    };
   }, [router]);
 }
 

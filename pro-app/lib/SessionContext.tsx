@@ -8,9 +8,18 @@ import {
   type ReactNode,
 } from 'react';
 
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
-import { api, followUpApi, loadSession, saveSession, type ProUser, type Role, type Session } from './api';
+import {
+  api,
+  followUpApi,
+  loadSession,
+  saveSession,
+  setOnUnauthorized,
+  type ProUser,
+  type Role,
+  type Session,
+} from './api';
 import { getDeviceKeyPair } from './followupKeys';
 import { registerForPushToken } from './notifications';
 
@@ -50,6 +59,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [pending, setPending] = useState<Ctx['pending']>(null);
 
+  const signOut = useCallback(async () => {
+    await saveSession(null);
+    setSession(null);
+    setPending(null);
+  }, []);
+
+  useEffect(() => {
+    setOnUnauthorized((msg) => {
+      void signOut();
+      Alert.alert('Session Expired', msg || 'You have been logged out or no account found for this ID');
+    });
+    return () => setOnUnauthorized(null);
+  }, [signOut]);
+
   useEffect(() => {
     loadSession().then((s) => {
       setSession(s);
@@ -61,10 +84,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             setSession(next);
             void saveSession(next);
           })
-          .catch(() => {});
+          .catch((err) => {
+            if (
+              err instanceof Error &&
+              (err.message.includes('logged out') || err.message.includes('no account found'))
+            ) {
+              void signOut();
+              Alert.alert('Session Expired', err.message);
+            }
+          });
       }
     });
-  }, []);
+  }, [signOut]);
 
   // Publish this device's follow-up public key so patients can seal a thread key
   // to it. Best-effort and idempotent; retried whenever the session id changes.
@@ -127,11 +158,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await saveSession(next);
   }, [session]);
 
-  const signOut = useCallback(async () => {
-    await saveSession(null);
-    setSession(null);
-    setPending(null);
-  }, []);
 
   const value = useMemo(
     () => ({ ready, session, pending, signIn, registerPro, refresh, signOut }),
