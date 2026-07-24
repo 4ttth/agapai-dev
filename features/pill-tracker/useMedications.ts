@@ -3,6 +3,7 @@ import { useContext, useEffect, useMemo, useState } from 'react';
 import { MedicationContext } from '@/providers/MedicationProvider';
 import type { DoseLog, DoseWithMedication } from '@/types';
 import { todayString } from '@/utils/datetime';
+import { success as hapticSuccess, tap as hapticTap } from '@/utils/haptics';
 import {
   deriveDisplayStatus,
   getNextDose,
@@ -46,11 +47,17 @@ export function useMedications() {
   const summary = useMemo(() => summarize(todaysDoses, now), [todaysDoses, now]);
   const nextDose = useMemo(() => getNextDose(todaysDoses, now), [todaysDoses, now]);
 
-  const markTaken = (dose: DoseLog) =>
-    ctx.recordDose({ ...dose, status: 'taken', takenAt: new Date().toISOString() });
+  const markTaken = (dose: DoseLog) => {
+    // A confirming success buzz — the patient feels the dose was logged even if
+    // they can't hear a sound or see the screen clearly.
+    hapticSuccess();
+    return ctx.recordDose({ ...dose, status: 'taken', takenAt: new Date().toISOString() });
+  };
 
-  const undoTaken = (dose: DoseLog) =>
-    ctx.recordDose({ ...dose, status: 'pending', takenAt: undefined });
+  const undoTaken = (dose: DoseLog) => {
+    hapticTap();
+    return ctx.recordDose({ ...dose, status: 'pending', takenAt: undefined });
+  };
 
   return {
     status: ctx.status,

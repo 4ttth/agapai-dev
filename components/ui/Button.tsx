@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 
 import { colors, layout, radii, spacing, typography } from '@/theme';
+import { error as hapticError, press as hapticPress, success as hapticSuccess } from '@/utils/haptics';
 import { AppText } from './AppText';
 
 type ButtonVariant = 'primary' | 'secondary' | 'success' | 'danger' | 'ghost';
@@ -25,6 +26,8 @@ interface ButtonProps {
   icon?: ReactNode;
   /** Screen-reader hint describing what happens on activation. */
   accessibilityHint?: string;
+  /** Haptic feedback on press. Defaults on; the flavour follows the variant. */
+  haptic?: boolean;
   testID?: string;
 }
 
@@ -50,16 +53,26 @@ function ButtonComponent({
   fullWidth = true,
   icon,
   accessibilityHint,
+  haptic = true,
   testID,
 }: ButtonProps) {
   const v = variantStyles[variant];
   const isDisabled = disabled || loading;
   const height = size === 'lg' ? layout.buttonHeight : layout.minTouchTarget;
 
+  const handlePress = (event: GestureResponderEvent) => {
+    if (haptic) {
+      if (variant === 'success') hapticSuccess();
+      else if (variant === 'danger') hapticError();
+      else hapticPress();
+    }
+    onPress(event);
+  };
+
   return (
     <Pressable
       testID={testID}
-      onPress={onPress}
+      onPress={handlePress}
       disabled={isDisabled}
       accessibilityRole="button"
       accessibilityLabel={label}

@@ -14,6 +14,39 @@ import { DEFAULT_NOTIFICATION_PREFS, type NotificationPrefs } from './notificati
 
 let handlerConfigured = false;
 
+/**
+ * The AgapAI signature. On iOS the custom sound is set per-notification
+ * ({@link SIGNATURE_SOUND}, bundled via the expo-notifications `sounds` config).
+ * On Android the sound and vibration live on the {@link REMINDER_CHANNEL_ID}
+ * channel — its vibration mirrors the in-app "tap-tap-thrum" haptic so the buzz
+ * feels unmistakably like AgapAI even on a locked phone.
+ */
+export const SIGNATURE_SOUND = 'agapai.wav';
+export const REMINDER_CHANNEL_ID = 'agapai-reminders';
+/** [waitBeforeStart, buzz, pause, buzz, pause, buzz] — the signature rhythm. */
+const SIGNATURE_VIBRATION = [0, 70, 90, 70, 150, 230];
+
+let channelsEnsured = false;
+
+/**
+ * Create the Android reminder channel that carries the AgapAI signature sound
+ * and vibration pattern. No-op on iOS/web and idempotent. iOS carries the sound
+ * per-notification instead (Android O+ ignores per-notification sound/vibration
+ * once a channel exists, so it must live on the channel).
+ */
+export async function ensureNotificationChannels(): Promise<void> {
+  if (Platform.OS !== 'android' || channelsEnsured) return;
+  channelsEnsured = true;
+  await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+    name: 'AgapAI reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: SIGNATURE_SOUND,
+    vibrationPattern: SIGNATURE_VIBRATION,
+    lightColor: '#0B4F9E',
+    bypassDnd: false,
+  }).catch(() => undefined);
+}
+
 /** Configure how notifications present while the app is foregrounded. Idempotent. */
 export function configureNotificationHandler(): void {
   if (handlerConfigured) return;
@@ -26,6 +59,8 @@ export function configureNotificationHandler(): void {
     }),
   });
   handlerConfigured = true;
+  // Fire-and-forget: the channel must exist before the first reminder fires.
+  void ensureNotificationChannels();
 }
 
 /**
@@ -89,8 +124,10 @@ export async function scheduleMedicationReminders(medication: Medication): Promi
           title: `Time for ${medication.name}`,
           body: `Take ${medication.dosage} ${medication.unit}. Tap “I Took This” when done.`,
           data: { medicationId: medication.id, kind: 'medication-reminder' },
+          sound: SIGNATURE_SOUND,
         },
         trigger: {
+          channelId: REMINDER_CHANNEL_ID,
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour: tod.hours,
           minute: tod.minutes,
@@ -126,8 +163,10 @@ export async function scheduleMoodReminder(time: string): Promise<string | null>
         title: 'How are you feeling today?',
         body: 'Take a moment to log your mood in AgapAI.',
         data: { kind: 'mood-reminder' },
+        sound: SIGNATURE_SOUND,
       },
       trigger: {
+        channelId: REMINDER_CHANNEL_ID,
         type: Notifications.SchedulableTriggerInputTypes.DAILY,
         hour: tod.hours,
         minute: tod.minutes,
@@ -150,6 +189,7 @@ export async function reconcileNotifications(
   prefs: NotificationPrefs = DEFAULT_NOTIFICATION_PREFS,
 ): Promise<void> {
   if (Platform.OS === 'web') return;
+  await ensureNotificationChannels();
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch {

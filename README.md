@@ -317,6 +317,7 @@ agapai/
 - [x] Voice assistant with local transcript history
 - [x] Next.js + shadcn admin with live charts & user management
 - [x] E2E-encrypted doctor follow-ups (chat + WebRTC calls, 7-day retention) — see [`docs/follow-ups.md`](docs/follow-ups.md)
+- [x] iOS custom haptics + signature notification sound, and Dynamic Island medication Live Activities (5-min-before nudge + exact-time check-in) — see [`docs/haptics-live-activities.md`](docs/haptics-live-activities.md)
 - [ ] Push notifications alongside SMS
 - [ ] Multi-language assistant voices
 - [ ] FHIR export of a patient's own record

@@ -19,6 +19,7 @@ interface ScreenProps {
   contentContainerStyle?: ViewStyle;
   background?: 'default' | 'muted' | 'primary';
   /** Pull-to-refresh control, forwarded to the scroll view (scroll only). */
+  /** Optional pull-to-refresh control, forwarded to the scroll view. */
   refreshControl?: ReactElement<RefreshControlProps>;
   testID?: string;
 }
