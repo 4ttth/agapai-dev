@@ -32,6 +32,12 @@ export interface ServerUser {
   notifyPostConsult?: boolean;
   /** Send an SMS when a pharmacist dispenses medicine. Default true. */
   notifyPostDispense?: boolean;
+  /** This device's NaCl public key for end-to-end follow-up key exchange. */
+  publicKey?: string | null;
+  /** Doctor opt-in: allow follow-up chat with the most recent patient. */
+  followUpChat?: boolean;
+  /** Doctor opt-in: allow follow-up calls with the most recent patient. */
+  followUpCall?: boolean;
   createdAt: string;
 }
 
@@ -141,4 +147,97 @@ export interface Professional {
   firstName: string;
   lastName: string;
   prcLicense?: string | null;
+}
+
+// ---------- Follow-ups (doctor ⇄ patient) ----------
+
+export interface FollowUpCounterpart {
+  id: string;
+  role: ServerRole;
+  firstName: string;
+  lastName: string;
+  prcLicense?: string | null;
+}
+
+/** A follow-up thread as returned by the server (no plaintext). */
+export interface FollowUpThread {
+  id: string;
+  status: 'OPEN' | 'CLOSED';
+  consultationId?: string | null;
+  createdAt: string;
+  lastMessageAt: string;
+  expiresAt: string;
+  closedAt?: string | null;
+  messageCount?: number;
+  counterpart: FollowUpCounterpart | null;
+}
+
+/** An encrypted follow-up message row. */
+export interface FollowUpMessageRow {
+  id: string;
+  threadId: string;
+  senderId: string;
+  senderRole: ServerRole;
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  createdAt: string;
+}
+
+/** An encrypted shared attachment row (past consultation / AI history). */
+export interface FollowUpShareRow {
+  id: string;
+  threadId: string;
+  kind: 'CONSULTATION' | 'AI_HISTORY';
+  label?: string | null;
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  createdAt: string;
+}
+
+/** Who the patient may follow up with, plus that doctor's public key. */
+export interface FollowUpEligibility {
+  eligible: boolean;
+  reason?: string;
+  chatEnabled?: boolean;
+  callEnabled?: boolean;
+  doctor?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    prcLicense?: string | null;
+    publicKey?: string | null;
+  };
+  consultationId?: string | null;
+  existingThreadId?: string | null;
+}
+
+/** Decrypted follow-up message payload (exists only on the two devices). */
+export interface FollowUpMessageBody {
+  text: string;
+}
+
+/** Decrypted CONSULTATION share payload (a past visit the patient re-shared). */
+export interface SharedConsultationPayload {
+  date?: string;
+  type?: string;
+  doctorName?: string;
+  description: string;
+  prescriptions: PrescriptionItem[];
+  hasVoice?: boolean;
+  voiceB64?: string;
+}
+
+/** Decrypted AI_HISTORY share payload (the patient's local assistant chats). */
+export interface SharedAiHistoryPayload {
+  conversations: Array<{
+    startedAt: string;
+    mode: 'text' | 'voice';
+    messages: Array<{ who: 'user' | 'ai'; text: string }>;
+  }>;
+}
+
+export interface IceServerConfig {
+  iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }>;
 }

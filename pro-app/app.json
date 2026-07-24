@@ -64,7 +64,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": false

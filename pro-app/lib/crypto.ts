@@ -56,3 +56,32 @@ export function decryptRecord(
     return null;
   }
 }
+
+export interface EncryptedRecord {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+}
+
+/** Generic JSON encrypt/decrypt with a raw key — used for follow-up messages. */
+export async function encryptJson(payload: unknown, key: string): Promise<EncryptedRecord> {
+  const salt = await randomHex(16);
+  const ivHex = await randomHex(16);
+  const iv = CryptoJS.enc.Hex.parse(ivHex);
+  const derived = CryptoJS.SHA256(key + salt);
+  const ciphertext = CryptoJS.AES.encrypt(JSON.stringify(payload), derived, { iv }).toString();
+  return { ciphertext, iv: ivHex, salt };
+}
+
+export function decryptJson<T>(record: EncryptedRecord, key: string): T | null {
+  try {
+    const derived = CryptoJS.SHA256(key + record.salt);
+    const bytes = CryptoJS.AES.decrypt(record.ciphertext, derived, {
+      iv: CryptoJS.enc.Hex.parse(record.iv),
+    });
+    const text = bytes.toString(CryptoJS.enc.Utf8);
+    return text ? (JSON.parse(text) as T) : null;
+  } catch {
+    return null;
+  }
+}

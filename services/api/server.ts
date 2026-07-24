@@ -2,10 +2,27 @@ import type {
   AgapaiSession,
   ConsultationRow,
   EgovProfile,
+  FollowUpEligibility,
+  FollowUpMessageRow,
+  FollowUpShareRow,
+  FollowUpThread,
+  IceServerConfig,
   Professional,
   ServerUser,
 } from '@/types';
 import { api } from './http';
+
+export interface SealedThreadKey {
+  wrappedKey: string;
+  wrapNonce: string;
+  wrapEphemPub: string;
+}
+
+export interface EncryptedBlob {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+}
 
 /** Thin, typed wrappers over the AgapAI server (which proxies all eGov APIs). */
 
@@ -146,6 +163,67 @@ export const serverApi = {
 
   directory() {
     return api<{ professionals: Professional[] }>('/directory/professionals');
+  },
+
+  // ---------- Follow-ups ----------
+
+  /** Publish this device's follow-up public key so a doctor can be sealed to. */
+  publishPublicKey(publicKey: string) {
+    return api<{ ok: boolean }>('/keys/public', { body: { publicKey } });
+  },
+
+  /** Who the patient may follow up with (their most recent doctor) + pubkey. */
+  followUpEligibility() {
+    return api<FollowUpEligibility>('/follow-up/eligibility');
+  },
+
+  /** Open (or resume) a follow-up thread with the most recent doctor. */
+  startFollowUp(input: {
+    doctorId: string;
+    consultationId?: string | null;
+    sealed: SealedThreadKey;
+    shares?: Array<{ kind: 'CONSULTATION' | 'AI_HISTORY'; label?: string } & EncryptedBlob>;
+    firstMessage?: EncryptedBlob;
+  }) {
+    return api<{ thread: FollowUpThread; resumed: boolean }>('/follow-up/threads', {
+      body: {
+        doctorId: input.doctorId,
+        consultationId: input.consultationId,
+        wrappedKey: input.sealed.wrappedKey,
+        wrapNonce: input.sealed.wrapNonce,
+        wrapEphemPub: input.sealed.wrapEphemPub,
+        shares: input.shares,
+        firstMessage: input.firstMessage,
+      },
+    });
+  },
+
+  listFollowUps() {
+    return api<{ threads: FollowUpThread[] }>('/follow-up/threads');
+  },
+
+  getFollowUp(id: string) {
+    return api<{
+      thread: FollowUpThread;
+      wrap: SealedThreadKey | null;
+      shares: FollowUpShareRow[];
+    }>(`/follow-up/threads/${id}`);
+  },
+
+  followUpMessages(id: string) {
+    return api<{ messages: FollowUpMessageRow[] }>(`/follow-up/threads/${id}/messages`);
+  },
+
+  sendFollowUpMessage(id: string, blob: EncryptedBlob) {
+    return api<{ message: FollowUpMessageRow }>(`/follow-up/threads/${id}/messages`, { body: blob });
+  },
+
+  closeFollowUp(id: string) {
+    return api<{ thread: FollowUpThread }>(`/follow-up/threads/${id}/close`, { body: {} });
+  },
+
+  followUpIce() {
+    return api<IceServerConfig>('/follow-up/ice');
   },
 
   health() {

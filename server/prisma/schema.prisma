@@ -51,6 +51,22 @@ model User {
   notifyPostConsult  Boolean @default(true)
   /** Notify the patient (SMS) when a pharmacist dispenses medicine for them. */
   notifyPostDispense Boolean @default(true)
+  /**
+   * This device's public key (NaCl box, base64) for end-to-end follow-up chat.
+   * A patient sealing a follow-up thread key to their doctor encrypts it to this
+   * key; only the doctor's device holds the matching secret. Rotated per device.
+   */
+  publicKey      String?
+  /**
+   * Doctor opt-in: allow patients to open a follow-up CHAT about their most
+   * recent consultation with this doctor. Off by default.
+   */
+  followUpChat   Boolean @default(false)
+  /**
+   * Doctor opt-in: allow the patient from the most recent consultation to place
+   * a follow-up CALL (WebRTC). Off by default and independent of chat.
+   */
+  followUpCall   Boolean @default(false)
   createdAt      DateTime @default(now())
 
   consultationsAsPatient Consultation[] @relation("patient")
@@ -58,6 +74,8 @@ model User {
   medications            Medication[]
   keyEscrow              KeyEscrow?
   pii                    PatientPII?
+  followUpsAsPatient     FollowUpThread[] @relation("fuPatient")
+  followUpsAsDoctor      FollowUpThread[] @relation("fuDoctor")
 
   // One National ID resolves to one eVerify uniqid, but the same person may be
   // both a patient (Health ID) and a professional. Uniqueness is per-role so a
@@ -147,6 +165,81 @@ model LivenessCheck {
   status    String   @default("PENDING")
   score     Float?
   createdAt DateTime @default(now())
+}
+
+/**
+ * A doctor ⇄ patient follow-up conversation about a past consultation.
+ *
+ * Follow-ups are end-to-end encrypted the same way consultations are: each
+ * thread has a random 256-bit thread key that never reaches the server in the
+ * clear. The patient generates it, keeps a copy on their phone, and SEALS it to
+ * the doctor's `publicKey` (NaCl box) — `wrappedKey`/`wrapNonce`/`wrapEphemPub`
+ * — so only the doctor's device can unwrap it. The server stores ciphertext it
+ * can never read.
+ *
+ * Retention: `expiresAt` is fixed at creation + 7 days. A cron sweep deletes the
+ * whole thread (messages + shares cascade) once expired, so a follow-up costs at
+ * most a week of storage — the patient re-shares if they need more time.
+ */
+model FollowUpThread {
+  id             String    @id @default(cuid())
+  patientId      String
+  doctorId       String
+  /** The consultation this follow-up is about (the patient's most recent). */
+  consultationId String?
+  wrappedKey     String?
+  wrapNonce      String?
+  wrapEphemPub   String?
+  status         String    @default("OPEN") // OPEN | CLOSED
+  createdAt      DateTime  @default(now())
+  lastMessageAt  DateTime  @default(now())
+  expiresAt      DateTime
+  closedAt       DateTime?
+
+  patient  User @relation("fuPatient", fields: [patientId], references: [id])
+  doctor   User @relation("fuDoctor", fields: [doctorId], references: [id])
+  messages FollowUpMessage[]
+  shares   FollowUpShare[]
+
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([expiresAt])
+}
+
+/** One end-to-end encrypted follow-up message (encrypted with the thread key). */
+model FollowUpMessage {
+  id         String   @id @default(cuid())
+  threadId   String
+  senderId   String
+  senderRole String // PATIENT | DOCTOR
+  ciphertext String
+  iv         String
+  salt       String
+  createdAt  DateTime @default(now())
+
+  thread FollowUpThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+}
+
+/**
+ * A patient-shared attachment on a follow-up thread — their past consultation
+ * transcript/voice note, or their local AI-assistant history — encrypted with
+ * the thread key so the doctor can read it for the 7-day window only.
+ */
+model FollowUpShare {
+  id         String   @id @default(cuid())
+  threadId   String
+  kind       String // CONSULTATION | AI_HISTORY
+  label      String?
+  ciphertext String
+  iv         String
+  salt       String
+  createdAt  DateTime @default(now())
+
+  thread FollowUpThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
 }
 
 model SmsLog {

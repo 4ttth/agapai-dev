@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { bus } from './bus.js';
 import { prisma } from './db.js';
 import {
   aiAssistant,
@@ -53,6 +54,9 @@ const publicUser = (u) => ({
   activeDeviceId: u.activeDeviceId,
   notifyPostConsult: u.notifyPostConsult,
   notifyPostDispense: u.notifyPostDispense,
+  publicKey: u.publicKey,
+  followUpChat: u.followUpChat,
+  followUpCall: u.followUpCall,
   createdAt: u.createdAt,
 });
 
@@ -412,6 +416,16 @@ api.patch(
     for (const k of ['notifyPostConsult', 'notifyPostDispense'])
       if (typeof b[k] === 'boolean') data[k] = b[k];
 
+    // Follow-up opt-ins are a professional setting; ignore them for patients so
+    // a patient client can't flip a doctor-only flag on their own row.
+    if (PRO_ROLES.includes(current.role)) {
+      for (const k of ['followUpChat', 'followUpCall'])
+        if (typeof b[k] === 'boolean') data[k] = b[k];
+    }
+
+    // Device public key for end-to-end follow-up key exchange (any role).
+    if (typeof b.publicKey === 'string' && b.publicKey) data.publicKey = b.publicKey;
+
     // Identity fields come from the National ID via eVerify and are immutable
     // once verified: the birth date can never be changed, and the mobile number
     // is locked once eVerify has supplied one. This mirrors the locked fields in
@@ -767,6 +781,326 @@ api.get(
   }),
 );
 
+// ---------- Follow-ups (doctor ⇄ patient, E2E chat + call signaling) ----------
+
+const FOLLOW_UP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days, matches the purge cron
+
+/**
+ * The patient's most-recent consultation decides who they may follow up with.
+ * Only that one doctor is eligible — older doctors and other consultations are
+ * never contactable. Returns { doctor, consultationId } or null.
+ */
+async function mostRecentDoctorFor(patientId) {
+  const latest = await prisma.consultation.findFirst({
+    where: { patientId },
+    orderBy: { date: 'desc' },
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          prcLicense: true,
+          publicKey: true,
+          followUpChat: true,
+          followUpCall: true,
+        },
+      },
+    },
+  });
+  if (!latest?.doctor) return null;
+  return { doctor: latest.doctor, consultationId: latest.id };
+}
+
+const threadView = (t, meId) => {
+  const iAmPatient = t.patientId === meId;
+  const other = iAmPatient ? t.doctor : t.patient;
+  return {
+    id: t.id,
+    status: t.status,
+    consultationId: t.consultationId,
+    createdAt: t.createdAt,
+    lastMessageAt: t.lastMessageAt,
+    expiresAt: t.expiresAt,
+    closedAt: t.closedAt,
+    messageCount: t._count?.messages ?? undefined,
+    counterpart: other
+      ? {
+          id: other.id,
+          role: iAmPatient ? 'DOCTOR' : 'PATIENT',
+          firstName: other.firstName,
+          lastName: other.lastName,
+          prcLicense: iAmPatient ? other.prcLicense ?? null : null,
+        }
+      : null,
+  };
+};
+
+/** Load a thread the caller participates in (and that hasn't expired), or 404/403. */
+async function loadParticipantThread(req, res) {
+  const thread = await prisma.followUpThread.findUnique({
+    where: { id: req.params.id },
+    include: {
+      _count: { select: { messages: true } },
+      doctor: { select: { id: true, firstName: true, lastName: true, prcLicense: true } },
+      patient: { select: { id: true, firstName: true, lastName: true } },
+    },
+  });
+  if (!thread || thread.expiresAt < new Date()) {
+    res.status(404).json({ error: 'This follow-up no longer exists (it may have expired).' });
+    return null;
+  }
+  if (thread.patientId !== req.auth.id && thread.doctorId !== req.auth.id) {
+    res.status(403).json({ error: 'Not a participant in this follow-up.' });
+    return null;
+  }
+  return thread;
+}
+
+/** Publish this device's follow-up public key (idempotent). Any role. */
+api.post(
+  '/keys/public',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { publicKey } = req.body || {};
+    if (!publicKey) return res.status(422).json({ error: 'publicKey required' });
+    await prisma.user.update({ where: { id: req.auth.id }, data: { publicKey } });
+    res.json({ ok: true });
+  }),
+);
+
+/** WebRTC ICE servers for a follow-up call. STUN is free; TURN is optional. */
+api.get(
+  '/follow-up/ice',
+  requireAuth,
+  wrap(async (_req, res) => {
+    const iceServers = [{ urls: (process.env.STUN_URLS || 'stun:stun.l.google.com:19302').split(',') }];
+    if (process.env.TURN_URL) {
+      iceServers.push({
+        urls: process.env.TURN_URL.split(','),
+        username: process.env.TURN_USERNAME || undefined,
+        credential: process.env.TURN_PASSWORD || undefined,
+      });
+    }
+    res.json({ iceServers });
+  }),
+);
+
+/**
+ * Who (if anyone) the signed-in patient may follow up with, plus that doctor's
+ * public key so the app can seal a thread key to them. Also reports whether an
+ * open thread already exists so the app can resume instead of duplicating.
+ */
+api.get(
+  '/follow-up/eligibility',
+  requireAuth,
+  wrap(async (req, res) => {
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const recent = await mostRecentDoctorFor(me.id);
+    if (!recent) return res.json({ eligible: false, reason: 'no-consultation' });
+    const { doctor, consultationId } = recent;
+    const existing = await prisma.followUpThread.findFirst({
+      where: {
+        patientId: me.id,
+        doctorId: doctor.id,
+        status: 'OPEN',
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    res.json({
+      eligible: doctor.followUpChat || doctor.followUpCall,
+      chatEnabled: doctor.followUpChat,
+      callEnabled: doctor.followUpCall,
+      doctor: {
+        id: doctor.id,
+        firstName: doctor.firstName,
+        lastName: doctor.lastName,
+        prcLicense: doctor.prcLicense,
+        publicKey: doctor.publicKey,
+      },
+      consultationId,
+      existingThreadId: existing?.id ?? null,
+    });
+  }),
+);
+
+/**
+ * Patient opens (or resumes) a follow-up thread with their most-recent doctor.
+ * The thread key is sealed to the doctor client-side; the server only stores the
+ * opaque wrap. Re-opening an existing OPEN thread returns it unchanged so keys
+ * aren't needlessly rotated.
+ */
+api.post(
+  '/follow-up/threads',
+  requireAuth,
+  wrap(async (req, res) => {
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me || me.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only' });
+    const b = req.body || {};
+    const recent = await mostRecentDoctorFor(me.id);
+    if (!recent) return res.status(403).json({ error: 'You have no consultation to follow up on yet.' });
+    if (b.doctorId !== recent.doctor.id)
+      return res.status(403).json({ error: 'Follow-ups are only with your most recent doctor.' });
+    if (!recent.doctor.followUpChat && !recent.doctor.followUpCall)
+      return res.status(403).json({ error: 'This doctor has not enabled follow-ups.' });
+
+    const existing = await prisma.followUpThread.findFirst({
+      where: { patientId: me.id, doctorId: recent.doctor.id, status: 'OPEN', expiresAt: { gt: new Date() } },
+      include: { _count: { select: { messages: true } }, doctor: true, patient: true },
+    });
+    if (existing) return res.json({ thread: threadView(existing, me.id), resumed: true });
+
+    if (!b.wrappedKey || !b.wrapNonce || !b.wrapEphemPub)
+      return res.status(422).json({ error: 'Sealed thread key (wrappedKey, wrapNonce, wrapEphemPub) required.' });
+
+    const shares = Array.isArray(b.shares) ? b.shares : [];
+    const thread = await prisma.followUpThread.create({
+      data: {
+        patientId: me.id,
+        doctorId: recent.doctor.id,
+        consultationId: b.consultationId ?? recent.consultationId,
+        wrappedKey: b.wrappedKey,
+        wrapNonce: b.wrapNonce,
+        wrapEphemPub: b.wrapEphemPub,
+        expiresAt: new Date(Date.now() + FOLLOW_UP_TTL_MS),
+        shares: {
+          create: shares
+            .filter((s) => s && s.ciphertext && s.iv && s.salt && ['CONSULTATION', 'AI_HISTORY'].includes(s.kind))
+            .map((s) => ({
+              kind: s.kind,
+              label: s.label ? String(s.label).slice(0, 120) : null,
+              ciphertext: s.ciphertext,
+              iv: s.iv,
+              salt: s.salt,
+            })),
+        },
+        ...(b.firstMessage?.ciphertext
+          ? {
+              messages: {
+                create: {
+                  senderId: me.id,
+                  senderRole: 'PATIENT',
+                  ciphertext: b.firstMessage.ciphertext,
+                  iv: b.firstMessage.iv,
+                  salt: b.firstMessage.salt,
+                },
+              },
+            }
+          : {}),
+      },
+      include: { _count: { select: { messages: true } }, doctor: true, patient: true },
+    });
+    res.json({ thread: threadView(thread, me.id), resumed: false });
+  }),
+);
+
+/** List the caller's follow-up threads (patient → theirs, doctor → theirs). */
+api.get(
+  '/follow-up/threads',
+  requireAuth,
+  wrap(async (req, res) => {
+    const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
+    if (!me) return res.status(404).json({ error: 'Not found' });
+    const where =
+      me.role === 'PATIENT' ? { patientId: me.id } : { doctorId: me.id };
+    const threads = await prisma.followUpThread.findMany({
+      where: { ...where, expiresAt: { gt: new Date() } },
+      orderBy: { lastMessageAt: 'desc' },
+      include: {
+        _count: { select: { messages: true } },
+        doctor: { select: { id: true, firstName: true, lastName: true, prcLicense: true } },
+        patient: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    res.json({ threads: threads.map((t) => threadView(t, me.id)) });
+  }),
+);
+
+/** One thread with its sealed key + shares (for the participant to decrypt). */
+api.get(
+  '/follow-up/threads/:id',
+  requireAuth,
+  wrap(async (req, res) => {
+    const thread = await loadParticipantThread(req, res);
+    if (!thread) return;
+    const shares = await prisma.followUpShare.findMany({
+      where: { threadId: thread.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({
+      thread: threadView(thread, req.auth.id),
+      // Only the doctor needs the wrap; it is sealed to their key regardless.
+      wrap:
+        req.auth.id === thread.doctorId
+          ? { wrappedKey: thread.wrappedKey, wrapNonce: thread.wrapNonce, wrapEphemPub: thread.wrapEphemPub }
+          : null,
+      shares,
+    });
+  }),
+);
+
+/** Messages in a thread, oldest first (ciphertext only). */
+api.get(
+  '/follow-up/threads/:id/messages',
+  requireAuth,
+  wrap(async (req, res) => {
+    const thread = await loadParticipantThread(req, res);
+    if (!thread) return;
+    const messages = await prisma.followUpMessage.findMany({
+      where: { threadId: thread.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ messages });
+  }),
+);
+
+/** Append an E2E-encrypted message; fan it out live to the peer. */
+api.post(
+  '/follow-up/threads/:id/messages',
+  requireAuth,
+  wrap(async (req, res) => {
+    const thread = await loadParticipantThread(req, res);
+    if (!thread) return;
+    if (thread.status !== 'OPEN')
+      return res.status(409).json({ error: 'This follow-up is closed.' });
+    const { ciphertext, iv, salt } = req.body || {};
+    if (!ciphertext || !iv || !salt)
+      return res.status(422).json({ error: 'ciphertext, iv, salt required' });
+    const senderRole = thread.patientId === req.auth.id ? 'PATIENT' : 'DOCTOR';
+    const message = await prisma.followUpMessage.create({
+      data: { threadId: thread.id, senderId: req.auth.id, senderRole, ciphertext, iv, salt },
+    });
+    await prisma.followUpThread
+      .update({ where: { id: thread.id }, data: { lastMessageAt: message.createdAt } })
+      .catch(() => {});
+    bus.emit('followup:message', { threadId: thread.id, message });
+    res.json({ message });
+  }),
+);
+
+/** Close a follow-up (either participant). It still purges at expiry. */
+api.post(
+  '/follow-up/threads/:id/close',
+  requireAuth,
+  wrap(async (req, res) => {
+    const thread = await loadParticipantThread(req, res);
+    if (!thread) return;
+    const updated = await prisma.followUpThread.update({
+      where: { id: thread.id },
+      data: { status: 'CLOSED', closedAt: new Date() },
+      include: {
+        _count: { select: { messages: true } },
+        doctor: { select: { id: true, firstName: true, lastName: true, prcLicense: true } },
+        patient: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    res.json({ thread: threadView(updated, req.auth.id) });
+  }),
+);
+
 // ---------- Dispense (pharmacist -> patient medication sync) ----------
 
 api.post(
@@ -1005,7 +1339,9 @@ api.delete(
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     const id = user.id;
-    // Consultations reference this person as patient or doctor (no cascade).
+    // Consultations and follow-up threads reference this person as patient or
+    // doctor (no cascade to User); messages/shares cascade from the thread.
+    await prisma.followUpThread.deleteMany({ where: { OR: [{ patientId: id }, { doctorId: id }] } }).catch(() => {});
     await prisma.consultation.deleteMany({ where: { OR: [{ patientId: id }, { doctorId: id }] } }).catch(() => {});
     await prisma.medication.deleteMany({ where: { patientId: id } }).catch(() => {});
     await prisma.smsLog.deleteMany({ where: { patientId: id } }).catch(() => {});

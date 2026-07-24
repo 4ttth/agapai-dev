@@ -5,6 +5,7 @@ import { setAuthToken } from '@/services/api/http';
 import type { AgapaiSession, ServerUser, VerifiedIdentity } from '@/types';
 import { makePatientKey } from '@/utils/crypto';
 import { getDeviceId } from '@/utils/device';
+import { getDeviceKeyPair } from '@/utils/followupKeys';
 import { readJson, removeKeys, writeJson } from '@/utils/storage';
 
 const SESSION_KEY = 'agapai/session-v2';
@@ -105,6 +106,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           patientKey = undefined;
         }
       }
+      // Publish this device's follow-up public key so their doctor can seal a
+      // thread key to it. Best-effort — a follow-up just won't start until it
+      // succeeds, and it's retried on every sign-in.
+      try {
+        const { publicKey } = await getDeviceKeyPair();
+        if (user.publicKey !== publicKey) void serverApi.publishPublicKey(publicKey).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+
       const next: AgapaiSession = { token, user, patientKey };
       await writeJson(SESSION_KEY, next);
       setSession(next);

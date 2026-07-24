@@ -110,6 +110,10 @@ function RootNavigator() {
       <Stack.Screen name="assistant" options={{ title: 'AI Health Assistant' }} />
       <Stack.Screen name="assistant-history" options={{ title: 'Conversation history' }} />
       <Stack.Screen name="consultation/[id]" options={{ title: 'Consultation record' }} />
+      <Stack.Screen name="follow-up/index" options={{ title: 'Doctor follow-ups' }} />
+      <Stack.Screen name="follow-up/start" options={{ title: 'Start a follow-up' }} />
+      <Stack.Screen name="follow-up/[id]" options={{ title: 'Follow-up' }} />
+      <Stack.Screen name="follow-up/call/[id]" options={{ title: 'Call', headerShown: false, presentation: 'fullScreenModal' }} />
       <Stack.Screen name="scan-document" options={{ title: 'Scan document', presentation: 'modal' }} />
       <Stack.Screen name="verify-identity" options={{ title: 'Verify your identity', presentation: 'modal' }} />
       <Stack.Screen name="recover-records" options={{ title: 'Recover records', presentation: 'modal' }} />

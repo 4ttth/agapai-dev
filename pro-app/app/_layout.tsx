@@ -24,6 +24,12 @@ export default function RootLayout() {
         <Stack.Screen name="scan-patient" options={{ title: 'Scan Health ID', presentation: 'modal' }} />
         <Stack.Screen name="new-consultation" options={{ title: 'New consultation record' }} />
         <Stack.Screen name="dispense" options={{ title: 'Dispense prescription' }} />
+        <Stack.Screen name="follow-ups" options={{ title: 'Follow-ups' }} />
+        <Stack.Screen name="follow-up/[id]" options={{ title: 'Follow-up' }} />
+        <Stack.Screen
+          name="follow-up/call/[id]"
+          options={{ title: 'Call', headerShown: false, presentation: 'fullScreenModal' }}
+        />
       </Stack>
     </SessionProvider>
   );
