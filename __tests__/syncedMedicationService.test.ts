@@ -1,10 +1,12 @@
 import { serverApi } from '@/services/api/server';
 import { syncedMedicationService } from '@/services/api/syncedMedicationService';
+import { writeJson } from '@/utils/storage';
 
 jest.mock('@/services/api/server', () => ({
   serverApi: {
     serverMedications: jest.fn(),
     syncSelfMedications: jest.fn(),
+    deleteServerMedication: jest.fn().mockResolvedValue({ ok: true }),
   },
 }));
 
@@ -75,5 +77,29 @@ describe('syncedMedicationService', () => {
         schedule: { frequency: 'once_daily', times: ['08:00'], startDate: '2026-07-24' },
       }),
     ).rejects.toThrow('Prescribed medicines are managed by your doctor or pharmacy.');
+  });
+
+  it('deletes a doctor-prescribed medicine on the server and hides it locally', async () => {
+    await syncedMedicationService.remove('srv-med_rx_101');
+
+    // The server id (without the srv- prefix) is deleted server-side so it
+    // leaves the patient's official medicine record (the consultation stays).
+    expect(serverApi.deleteServerMedication).toHaveBeenCalledWith('med_rx_101');
+    // …and it is hidden locally so it disappears at once, even offline.
+    expect(writeJson).toHaveBeenCalledWith(
+      'agapai/hidden-server-meds-v1',
+      expect.arrayContaining(['srv-med_rx_101']),
+    );
+  });
+
+  it('still hides a prescribed medicine locally if the server delete fails', async () => {
+    (serverApi.deleteServerMedication as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+
+    await expect(syncedMedicationService.remove('srv-med_rx_101')).resolves.toBeUndefined();
+
+    expect(writeJson).toHaveBeenCalledWith(
+      'agapai/hidden-server-meds-v1',
+      expect.arrayContaining(['srv-med_rx_101']),
+    );
   });
 });

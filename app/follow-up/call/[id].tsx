@@ -21,10 +21,11 @@ export default function FollowUpCallScreen() {
   const { id, mode } = useLocalSearchParams<{ id: string; mode?: string }>();
   const router = useRouter();
   const isCaller = mode !== 'callee';
-  const { state, error, muted, start, accept, decline, hangUp, toggleMute } = useWebRtcCall({
-    threadId: id,
-    initiator: isCaller,
-  });
+  const { state, error, muted, speakerOn, start, accept, decline, hangUp, toggleMute, toggleSpeaker } =
+    useWebRtcCall({
+      threadId: id,
+      initiator: isCaller,
+    });
 
   useEffect(() => {
     void start();
@@ -83,14 +84,29 @@ export default function FollowUpCallScreen() {
         ) : (
           <>
             {state !== 'error' && state !== 'ended' ? (
-              <Pressable
-                onPress={toggleMute}
-                style={[styles.control, muted && styles.controlActive]}
-                accessibilityRole="button"
-                accessibilityLabel={muted ? 'Unmute' : 'Mute'}
-              >
-                <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color={colors.onPrimary} />
-              </Pressable>
+              <>
+                <Pressable
+                  onPress={toggleSpeaker}
+                  style={[styles.control, speakerOn && styles.controlActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: speakerOn }}
+                  accessibilityLabel={speakerOn ? 'Turn off loudspeaker' : 'Turn on loudspeaker'}
+                >
+                  <Ionicons
+                    name={speakerOn ? 'volume-high' : 'volume-low'}
+                    size={26}
+                    color={colors.onPrimary}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={toggleMute}
+                  style={[styles.control, muted && styles.controlActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={muted ? 'Unmute' : 'Mute'}
+                >
+                  <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color={colors.onPrimary} />
+                </Pressable>
+              </>
             ) : null}
             <Pressable
               onPress={() => {

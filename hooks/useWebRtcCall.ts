@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AudioManager } from 'react-native-audio-api';
 
 import { appConfig } from '@/constants';
 import { getAuthToken } from '@/services/api/http';
@@ -42,6 +43,7 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
   const [state, setState] = useState<CallState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<any>(null);
@@ -89,6 +91,35 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
     }
     setMuted(nowMuted);
   }, [muted]);
+
+  /**
+   * Route call audio to the loudspeaker or back to the earpiece. iOS shares one
+   * AVAudioSession across the whole app, so flipping `defaultToSpeaker` here
+   * moves the live WebRTC audio too. Wrapped in try/catch because the native
+   * audio module isn't present in Expo Go (where calls can't run anyway) — a
+   * missing route control should never crash an in-progress call.
+   */
+  const applyAudioRoute = useCallback((toSpeaker: boolean) => {
+    try {
+      AudioManager.setAudioSessionOptions({
+        iosCategory: 'playAndRecord',
+        iosMode: 'voiceChat',
+        iosOptions: toSpeaker
+          ? ['defaultToSpeaker', 'allowBluetoothHFP']
+          : ['allowBluetoothHFP'],
+      });
+    } catch {
+      /* audio routing control unavailable — non-fatal */
+    }
+  }, []);
+
+  const toggleSpeaker = useCallback(() => {
+    setSpeakerOn((prev) => {
+      const next = !prev;
+      applyAudioRoute(next);
+      return next;
+    });
+  }, [applyAudioRoute]);
 
   const start = useCallback(async () => {
     if (startedRef.current) return;
@@ -223,5 +254,5 @@ export function useWebRtcCall({ threadId, initiator }: Options) {
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  return { state, error, muted, start, accept, decline, hangUp, toggleMute };
+  return { state, error, muted, speakerOn, start, accept, decline, hangUp, toggleMute, toggleSpeaker };
 }

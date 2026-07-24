@@ -23,8 +23,25 @@ export function useSpeech() {
   // Bumped on every stop()/new speak() so an in-flight request whose playback
   // has been superseded (or cancelled) resolves into a no-op.
   const genRef = useRef(0);
+  // Safety timer that clears `speaking` if the audio node's onEnded never fires.
+  const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Best-effort: route audio to the loudspeaker (and keep sound on with the
+   *  ringer muted). A prior voice call may have left the session in record mode,
+   *  which can silence playback — so we reset it before speaking either way. */
+  const routeToSpeaker = useCallback(() => {
+    try {
+      AudioManager.setAudioSessionOptions({ iosCategory: 'playback', iosOptions: ['defaultToSpeaker'] });
+    } catch {
+      /* native audio module unavailable (e.g. Expo Go) — non-fatal */
+    }
+  }, []);
 
   const teardownAudio = useCallback(() => {
+    if (endTimerRef.current) {
+      clearTimeout(endTimerRef.current);
+      endTimerRef.current = null;
+    }
     try {
       sourceRef.current?.stop();
     } catch {}
@@ -53,16 +70,20 @@ export function useSpeech() {
   );
 
   /** Device fallback voice (expo-speech). */
-  const speakOnDevice = useCallback((text: string) => {
-    Speech.stop();
-    setSpeaking(true);
-    Speech.speak(text, {
-      rate: 0.95,
-      onDone: () => setSpeaking(false),
-      onStopped: () => setSpeaking(false),
-      onError: () => setSpeaking(false),
-    });
-  }, []);
+  const speakOnDevice = useCallback(
+    (text: string) => {
+      Speech.stop();
+      routeToSpeaker(); // ensure playback routing so the device voice is audible
+      setSpeaking(true);
+      Speech.speak(text, {
+        rate: 0.95,
+        onDone: () => setSpeaking(false),
+        onStopped: () => setSpeaking(false),
+        onError: () => setSpeaking(false),
+      });
+    },
+    [routeToSpeaker],
+  );
 
   const speak = useCallback(
     async (text: string) => {
@@ -76,16 +97,15 @@ export function useSpeech() {
       teardownAudio();
       setSpeaking(true);
 
+      // Route to the loudspeaker up front so BOTH the neural voice and the
+      // device fallback are audible, even right after a voice call.
+      routeToSpeaker();
+
       try {
         const { audio, rate } = await serverApi.synthesizeSpeech(clean);
         if (gen !== genRef.current) return; // stopped or superseded while awaiting
 
         const sampleRate = rate || 24000;
-        // Route to the loudspeaker and keep sound on even with the ringer muted.
-        AudioManager.setAudioSessionOptions({
-          iosCategory: 'playback',
-          iosOptions: ['defaultToSpeaker'],
-        });
         const ctx = new AudioContext({ sampleRate });
         const buffer = await decodePCMInBase64(audio, sampleRate, 1);
         if (gen !== genRef.current) {
@@ -101,6 +121,17 @@ export function useSpeech() {
         ctxRef.current = ctx;
         sourceRef.current = source;
         source.start(0);
+
+        // Safety net: some devices don't fire onEnded reliably. Clear the
+        // speaking flag after the clip's known duration so the "Read aloud"
+        // button can't get stuck on "Stop reading".
+        const holdMs = Number.isFinite(buffer.duration) ? buffer.duration * 1000 + 500 : 0;
+        if (holdMs > 0) {
+          if (endTimerRef.current) clearTimeout(endTimerRef.current);
+          endTimerRef.current = setTimeout(() => {
+            if (gen === genRef.current) setSpeaking(false);
+          }, holdMs);
+        }
       } catch (err) {
         if (gen !== genRef.current) return;
         console.warn('[useSpeech] Gemini TTS failed, falling back to device voice:', err);
@@ -108,7 +139,7 @@ export function useSpeech() {
         speakOnDevice(clean);
       }
     },
-    [teardownAudio, speakOnDevice],
+    [teardownAudio, speakOnDevice, routeToSpeaker],
   );
 
   const toggle = useCallback(

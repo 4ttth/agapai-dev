@@ -123,8 +123,26 @@ export const syncedMedicationService: MedicationService = {
 
   async remove(id) {
     if (id.startsWith('srv-')) {
-      const hidden = await readJson<string[]>(HIDDEN_KEY, []);
-      await writeJson(HIDDEN_KEY, [...hidden, id]);
+      // A doctor-prescribed / pharmacy-dispensed row. Delete it on the server
+      // so it leaves the patient's official medicine record too (the doctor's
+      // consultation stays intact) — then drop it locally so it disappears at
+      // once and can't reappear from a stale pull.
+      const serverId = id.slice('srv-'.length);
+      try {
+        await serverApi.deleteServerMedication(serverId);
+      } catch {
+        // Offline or the request failed — fall through to hiding it locally so
+        // it vanishes on this device now; a later successful pull reconciles it.
+      }
+      const [hidden, cached] = await Promise.all([
+        readJson<string[]>(HIDDEN_KEY, []),
+        readJson<ServerMed[]>(SERVER_MEDS_KEY, []),
+      ]);
+      if (!hidden.includes(id)) await writeJson(HIDDEN_KEY, [...hidden, id]);
+      await writeJson(
+        SERVER_MEDS_KEY,
+        cached.filter((m) => `srv-${m.id}` !== id),
+      );
       return;
     }
     await localService.remove(id);
