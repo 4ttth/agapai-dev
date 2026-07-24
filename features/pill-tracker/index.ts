@@ -6,4 +6,10 @@ export { PillCard } from './components/PillCard';
 export { NextDoseCard } from './components/NextDoseCard';
 export { ScheduleForm } from './components/ScheduleForm';
 export { doseStatusPresentation } from './components/doseStatus';
+export {
+  MEDICATION_CATEGORIES,
+  categoryMeta,
+  guessCategory,
+  resolveCategory,
+} from './medicationCategory';
 export * from './logic';

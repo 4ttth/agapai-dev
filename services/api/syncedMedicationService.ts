@@ -1,6 +1,9 @@
+// Import the module directly (not the feature barrel) to avoid a circular
+// dependency: the barrel pulls in useMedications, which uses this service.
+import { guessCategory } from '@/features/pill-tracker/medicationCategory';
 import type { MedicationService } from '@/services/api';
 import { medicationService as localService } from '@/services/mock/medicationService';
-import type { Medication, NewMedicationInput } from '@/types';
+import type { Medication, MedicationCategory, NewMedicationInput } from '@/types';
 import { readJson, writeJson } from '@/utils/storage';
 import { serverApi } from './server';
 
@@ -23,10 +26,15 @@ interface ServerMed {
   times: string[];
   quantity?: number | null;
   source: 'SELF' | 'DOCTOR' | 'PHARMACIST';
+  /** Visual category classified server-side (AI + cache); may be absent. */
+  category?: MedicationCategory;
   createdAt: string;
 }
 
 function toMedication(m: ServerMed): Medication {
+  // Prefer the server's classified category; fall back to an offline guess so
+  // prescribed medicines always get a meaningful icon.
+  const category = m.category ?? guessCategory(m.name);
   return {
     id: `srv-${m.id}`,
     name: m.name,
@@ -37,6 +45,7 @@ function toMedication(m: ServerMed): Medication {
       color: m.source === 'PHARMACIST' ? 'From pharmacy' : 'Prescribed',
       colorHex: m.source === 'PHARMACIST' ? '#0F6E6E' : '#0B4F9E',
       shape: 'round',
+      category,
     },
     schedule: {
       frequency: 'custom',

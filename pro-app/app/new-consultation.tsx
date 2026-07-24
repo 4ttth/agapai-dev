@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { api, CONSULTATION_TYPES, type PrescriptionItem } from '@/lib/api';
+import { MedicationCategoryIcon } from '@/lib/medicationCategory';
 import { encryptRecord } from '@/lib/crypto';
 import { clearScannedPatient, getScannedPatient } from '@/lib/scanStore';
 import { colors, radii, spacing } from '@/lib/theme';
@@ -266,13 +267,16 @@ export default function NewConsultationScreen() {
         </T>
         {rxRows.map((r, i) => (
           <Card key={i} style={styles.rxCard}>
-            <TextInput
-              value={r.name}
-              onChangeText={(v) => setRxRows((rows) => rows.map((x, j) => (j === i ? { ...x, name: v } : x)))}
-              placeholder="Medicine name (e.g. Amoxicillin)"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-            />
+            <View style={styles.rxNameRow}>
+              <MedicationCategoryIcon name={r.name} />
+              <TextInput
+                value={r.name}
+                onChangeText={(v) => setRxRows((rows) => rows.map((x, j) => (j === i ? { ...x, name: v } : x)))}
+                placeholder="Medicine name (e.g. Amoxicillin)"
+                placeholderTextColor={colors.textMuted}
+                style={[styles.input, styles.flex]}
+              />
+            </View>
             <View style={styles.rxRow}>
               <TextInput
                 value={r.dosage}
@@ -421,6 +425,7 @@ const styles = StyleSheet.create({
   },
   voiceRec: { backgroundColor: colors.danger, borderColor: colors.danger },
   rxCard: { gap: spacing.md, padding: spacing.lg },
+  rxNameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   rxRow: { flexDirection: 'row', gap: spacing.md },
   qty: { width: 90 },
   input: {

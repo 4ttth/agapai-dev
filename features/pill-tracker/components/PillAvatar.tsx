@@ -1,31 +1,24 @@
-import { Image } from 'react-native';
-import { StyleSheet, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image, StyleSheet, View } from 'react-native';
 
 import { colors, radii } from '@/theme';
-import type { PillAppearance } from '@/types';
-
-const shapeRadius: Record<PillAppearance['shape'], number> = {
-  round: radii.pill,
-  oval: 20,
-  capsule: radii.pill,
-  oblong: 12,
-  other: radii.sm,
-};
+import type { Medication } from '@/types';
+import { categoryMeta, resolveCategory } from '../medicationCategory';
 
 interface PillAvatarProps {
-  appearance: PillAppearance;
+  medication: Pick<Medication, 'name' | 'form' | 'appearance'>;
   size?: number;
 }
 
 /**
- * Visual pill identifier. Shows the actual photo when available, otherwise a
- * color/shape swatch so patients can match the physical pill at a glance.
+ * Visual medicine identifier. Shows the actual photo when available; otherwise
+ * a category icon (pill, capsule, liquid, inhaler, injection, drops, cream, or
+ * a generic fallback) so every medicine has a clear, recognizable image. For
+ * pills/capsules the badge is tinted with the patient's chosen pill color so it
+ * still helps match the physical medicine at a glance.
  */
-export function PillAvatar({ appearance, size = 56 }: PillAvatarProps) {
-  const borderRadius = shapeRadius[appearance.shape];
-  const isWide = appearance.shape === 'capsule' || appearance.shape === 'oblong';
-  const width = size;
-  const height = isWide ? size * 0.6 : size;
+export function PillAvatar({ medication, size = 56 }: PillAvatarProps) {
+  const { appearance } = medication;
 
   if (appearance.imageUri) {
     return (
@@ -37,21 +30,33 @@ export function PillAvatar({ appearance, size = 56 }: PillAvatarProps) {
     );
   }
 
+  const category = resolveCategory({
+    name: medication.name,
+    form: medication.form,
+    category: appearance.category,
+  });
+  const meta = categoryMeta[category];
+  // Preserve the "match the pill color" affordance for tablets/capsules: use the
+  // patient's chosen (pale) pill color as the badge, with the icon on top.
+  const tinted = category === 'pill' || category === 'capsule';
+  const background = tinted && appearance.colorHex ? appearance.colorHex : meta.bg;
+
   return (
     <View
       accessible
-      accessibilityLabel={`${appearance.color} ${appearance.shape} pill`}
-      style={[
-        styles.swatch,
-        { width, height, borderRadius, backgroundColor: appearance.colorHex },
-      ]}
-    />
+      accessibilityLabel={`${meta.label}${appearance.color ? `, ${appearance.color}` : ''}`}
+      style={[styles.badge, { width: size, height: size, borderRadius: radii.md, backgroundColor: background }]}
+    >
+      <MaterialCommunityIcons name={meta.icon} size={size * 0.55} color={meta.color} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   image: { backgroundColor: colors.surfaceMuted },
-  swatch: {
+  badge: {
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
