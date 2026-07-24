@@ -229,9 +229,11 @@ export async function getLivenessResult(token) {
     }
   }
 
-  // If status is SUCCEEDED/SUCCESS/PASSED but no numeric score was provided in payload, default to 100%
-  if (isNaN(rawScore)) {
-    rawScore = isSucceeded ? 100 : 0;
+  // If status is SUCCEEDED/SUCCESS/PASSED but score is 0, NaN, or unprovided, default to 100%
+  if (isSucceeded && (isNaN(rawScore) || rawScore === 0)) {
+    rawScore = 100;
+  } else if (isNaN(rawScore)) {
+    rawScore = 0;
   }
 
   const score = rawScore > 0 && rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);

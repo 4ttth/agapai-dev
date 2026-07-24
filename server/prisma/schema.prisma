@@ -268,6 +268,36 @@ model Metric {
 }
 
 /**
+ * Verbose per-request log for the admin dashboard. Captures sanitized request
+ * and response details (headers, body, response body). Sensitive values
+ * (Authorization, x-admin-key, passwords) are redacted before storage.
+ * Auto-pruned: rows older than 7 days are deleted by the nightly cron.
+ */
+model RequestLog {
+  id          String   @id @default(cuid())
+  method      String
+  route       String
+  /** Full path including query string, e.g. /api/users?page=1 */
+  fullPath    String
+  status      Int
+  ms          Int
+  /** Sanitized request headers as JSON */
+  reqHeaders  String   @default("{}")
+  /** Sanitized request body as JSON (truncated at 10 KB) */
+  reqBody     String   @default("{}")
+  /** Sanitized response body as JSON (truncated at 10 KB) */
+  resBody     String   @default("{}")
+  /** IP address of the caller */
+  ip          String?
+  at          DateTime @default(now())
+
+  @@index([at])
+  @@index([method])
+  @@index([status])
+  @@index([route])
+}
+
+/**
  * Cache of medicine name → visual category (pill, capsule, liquid, inhaler,
  * injection, drops, cream, other). Populated by the AI classifier (Gemini
  * Structured Output) or the keyword heuristic, keyed by the normalized name so

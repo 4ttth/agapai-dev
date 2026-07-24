@@ -89,6 +89,7 @@ async function verifyLivenessToken(token, { purpose = 'generic', userId = null }
 // setting EVERIFY_IDENTITY_MATCH=off — but it defaults ON, because a plain
 // liveness check only proves *a* live person, not *which* person.
 const identityMatchEnabled = () => (process.env.EVERIFY_IDENTITY_MATCH || 'on').toLowerCase() !== 'off';
+const getLivenessThreshold = () => Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
 
 /**
  * Prove that the person in front of the camera is the account holder — not just
@@ -323,9 +324,10 @@ api.post(
       const live = await verifyLivenessToken(b.livenessToken, { purpose: `register:${role}` });
       if (!live.ok) {
         const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(live.status ?? '').toUpperCase());
+        const thresh = getLivenessThreshold();
         const errorMsg =
-          isSucceeded && live.score < 95
-            ? `Face Liveness score too low (${live.score}% < 95% required). Please try the liveness test again.`
+          isSucceeded && live.score < thresh
+            ? `Face Liveness score too low (${live.score}% < ${thresh}% required). Please try the liveness test again.`
             : `Face Liveness check did not pass (${live.status ?? 'no result'}${
                 live.score ? `, score ${live.score}%` : ''
               }). Please try the liveness test again.`;
@@ -543,11 +545,12 @@ api.post(
     const check = await verifyAccountHolder(livenessToken, me, 'edit-unlock');
     if (!check.ok) {
       const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const thresh = getLivenessThreshold();
       const errorMsg =
         check.reason === 'identity'
           ? check.error
-          : isSucceeded && check.score < 95
-          ? `Face Liveness confidence score too low (${check.score}% < 95% required).`
+          : isSucceeded && check.score < thresh
+          ? `Face Liveness confidence score too low (${check.score}% < ${thresh}% required).`
           : `Face Liveness check did not pass (${check.status ?? 'no result'}).`;
       return res.status(403).json({
         error: errorMsg,
@@ -630,11 +633,12 @@ api.post(
     const check = await verifyAccountHolder(livenessToken, me, 'key-recovery');
     if (!check.ok) {
       const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const thresh = getLivenessThreshold();
       const errorMsg =
         check.reason === 'identity'
           ? `${check.error} Records stay locked.`
-          : isSucceeded && check.score < 95
-          ? `Face Liveness confidence score too low (${check.score}% < 95% required). Records stay locked.`
+          : isSucceeded && check.score < thresh
+          ? `Face Liveness confidence score too low (${check.score}% < ${thresh}% required). Records stay locked.`
           : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`;
       return res.status(403).json({
         error: errorMsg,
