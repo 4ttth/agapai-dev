@@ -206,6 +206,24 @@ export function useGeminiLive() {
             return;
           }
 
+          // The relay sends a structured error when it couldn't reach any voice
+          // model (e.g. the server key has REST access for chat but no Live-API
+          // entitlement). Surface the real reason instead of a blank failure.
+          if (msg.error) {
+            const detail =
+              typeof msg.detail === 'string' && msg.detail
+                ? msg.detail
+                : typeof msg.error === 'string'
+                  ? msg.error
+                  : null;
+            setError(
+              `The voice assistant is unavailable right now${detail ? ` (${detail})` : ''}. You can tap Type to chat instead.`,
+            );
+            setState('error');
+            teardown();
+            return;
+          }
+
           // Live transcription of both sides (for the local history transcript).
           const userText = msg.serverContent?.inputTranscription?.text;
           if (typeof userText === 'string' && userText) {

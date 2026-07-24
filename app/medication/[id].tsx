@@ -71,7 +71,9 @@ export default function MedicationDetailScreen() {
   const confirmDelete = () => {
     Alert.alert(
       'Remove this medicine?',
-      `This will delete ${medication.name} and its reminders.`,
+      isPrescribed
+        ? `This removes ${medication.name} and its reminders from your phone and your medicine record. Your doctor's consultation record stays saved — only the medicine is removed.`
+        : `This will delete ${medication.name} and its reminders.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -166,15 +168,25 @@ export default function MedicationDetailScreen() {
       )}
 
       {isPrescribed ? (
-        <View style={styles.prescribedNote}>
-          <Ionicons name="lock-closed" size={18} color={colors.textSecondary} />
-          <AppText variant="caption" color="secondary" style={styles.flex}>
-            {medication.prescribingDoctor?.includes('Pharmacy')
-              ? 'Dispensed by a pharmacy'
-              : 'Prescribed by your doctor'}
-            . These details are managed for you and can&apos;t be edited here — they stay in sync
-            with your official record and reminders.
-          </AppText>
+        <View style={styles.actions}>
+          <View style={styles.prescribedNote}>
+            <Ionicons name="lock-closed" size={18} color={colors.textSecondary} />
+            <AppText variant="caption" color="secondary" style={styles.flex}>
+              {medication.prescribingDoctor?.includes('Pharmacy')
+                ? 'Dispensed by a pharmacy'
+                : 'Prescribed by your doctor'}
+              . These details are managed for you and can&apos;t be edited here. You can still
+              remove the medicine if you no longer take it — your doctor&apos;s consultation record
+              stays saved.
+            </AppText>
+          </View>
+          <Button
+            label="Remove medicine"
+            variant="danger"
+            icon={<Ionicons name="trash-outline" size={20} color={colors.onDanger} />}
+            onPress={confirmDelete}
+            accessibilityHint={`Removes ${medication.name} from your record`}
+          />
         </View>
       ) : (
         <View style={styles.actions}>
@@ -209,7 +221,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.sm,
-    marginTop: spacing.xxl,
     backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
     padding: spacing.lg,

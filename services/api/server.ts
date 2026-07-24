@@ -185,6 +185,16 @@ export const serverApi = {
     return api<{ ok: boolean }>('/medications/sync', { method: 'PUT', body: { medications } });
   },
 
+  /**
+   * Delete one of the patient's own server-side medicines by its server id
+   * (the `srv-` prefix stripped) — used when a patient removes a medicine a
+   * doctor prescribed or a pharmacy dispensed. The doctor's consultation record
+   * is left intact; only the medicine (and its reminders) go away.
+   */
+  deleteServerMedication(id: string) {
+    return api<{ ok: boolean }>(`/medications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   directory() {
     return api<{ professionals: Professional[] }>('/directory/professionals');
   },

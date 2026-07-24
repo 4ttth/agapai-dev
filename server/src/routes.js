@@ -1470,6 +1470,28 @@ api.put(
   }),
 );
 
+/**
+ * Patient deletes a single medicine from their own record — including one that
+ * a doctor prescribed or a pharmacy dispensed. Only the Medication row is
+ * removed; the doctor's Consultation (the source of truth for what was
+ * prescribed) is left untouched, so the visit record stays intact even after
+ * the patient stops tracking the medicine. A patient can only delete their own
+ * rows.
+ */
+api.delete(
+  '/medications/:id',
+  requireAuth,
+  wrap(async (req, res) => {
+    const { id } = req.params;
+    const med = await prisma.medication.findUnique({ where: { id } });
+    if (!med || med.patientId !== req.auth.id) {
+      return res.status(404).json({ error: 'Medicine not found.' });
+    }
+    await prisma.medication.delete({ where: { id } });
+    res.json({ ok: true });
+  }),
+);
+
 // ---------- Public directory (PRC accountability) ----------
 
 api.get(
@@ -1511,9 +1533,17 @@ api.get(
       where: { at: { gte: dayAgo } },
       select: { at: true, status: true, ms: true },
     });
+    // Render chart times in Philippine time (Asia/Manila, a fixed UTC+8 with no
+    // DST) regardless of the server's own timezone — otherwise a UTC-hosted
+    // server labels the graphs 8 hours behind what PH admins expect. Shifting
+    // the instant by +8h and then reading the UTC fields yields Manila
+    // wall-clock values without pulling in a timezone library.
+    const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const manila = (t) => new Date(new Date(t).getTime() + MANILA_OFFSET_MS);
+
     const hourly = Array.from({ length: 24 }, (_, i) => {
-      const h = new Date(Date.now() - (23 - i) * 3600 * 1000);
-      return { hour: `${String(h.getHours()).padStart(2, '0')}:00`, requests: 0, errors: 0 };
+      const h = manila(Date.now() - (23 - i) * 3600 * 1000);
+      return { hour: `${String(h.getUTCHours()).padStart(2, '0')}:00`, requests: 0, errors: 0 };
     });
     const nowH = new Date();
     for (const m of recentMetrics) {
@@ -1526,18 +1556,24 @@ api.get(
     }
 
     // Signups per day over the last 14 days (for the growth chart).
-    const twoWeeks = new Date(Date.now() - 14 * 24 * 3600 * 1000);
+    // Look back a little over two weeks (instant-based) so no user whose Manila
+    // calendar day falls within the last 14 days is dropped at the UTC boundary.
+    const twoWeeks = new Date(Date.now() - 15 * 24 * 3600 * 1000);
     const newUsers = await prisma.user.findMany({
       where: { createdAt: { gte: twoWeeks } },
       select: { createdAt: true, role: true },
     });
+    // Bucket sign-ups by Manila calendar day so the day boundaries match what
+    // PH admins see (a midnight-Manila sign-up lands on the right day, not the
+    // UTC day that is still 8 hours behind).
+    const manilaDay = (t) => manila(t).toISOString().slice(0, 10);
     const dailyMap = new Map();
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const d = manilaDay(Date.now() - i * 24 * 3600 * 1000);
       dailyMap.set(d, { date: d, patients: 0, professionals: 0 });
     }
     for (const u of newUsers) {
-      const d = new Date(u.createdAt).toISOString().slice(0, 10);
+      const d = manilaDay(u.createdAt);
       const row = dailyMap.get(d);
       if (row) row[u.role === 'PATIENT' ? 'patients' : 'professionals'] += 1;
     }

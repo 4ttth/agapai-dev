@@ -16,7 +16,27 @@ import { verifyToken } from './token.js';
  * Only the native-audio model answers bidiGenerateContent on our key — the
  * *-live-* ids 404 — so it is the default.
  */
-const LIVE_MODEL = () => process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-09-2025';
+const DEFAULT_LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
+
+/**
+ * Native-audio Live models to try, in order. The primary (env override or the
+ * current default) is always attempted first; the rest are best-effort
+ * fallbacks so a rotated or retired preview id degrades to a working model
+ * instead of a dead "Couldn't start voice". Only the native-audio ids answer
+ * bidiGenerateContent on our key — the plain *-live-* ids 404 — so the list is
+ * kept to native-audio variants.
+ */
+function liveModels() {
+  const primary = process.env.GEMINI_LIVE_MODEL || DEFAULT_LIVE_MODEL;
+  return Array.from(
+    new Set([
+      primary,
+      'gemini-2.5-flash-native-audio-preview-09-2025',
+      'gemini-2.5-flash-preview-native-audio-dialog',
+    ]),
+  );
+}
+
 const LIVE_URL = () =>
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' +
   (process.env.GEMINI_API_KEY || '');
@@ -54,7 +74,7 @@ export function attachLiveRelay(server) {
     wss.handleUpgrade(req, socket, head, (ws) => bridge(ws, auth, url.searchParams.get('documentText') || ''));
   });
 
-  console.log(`[live] Gemini Live relay ready at /ws/live (model ${LIVE_MODEL()})`);
+  console.log(`[live] Gemini Live relay ready at /ws/live (models: ${liveModels().join(', ')})`);
   return wss;
 }
 
@@ -84,6 +104,35 @@ function stripThoughts(data) {
   return JSON.stringify(msg);
 }
 
+/** Build the Gemini Live setup frame for a given model + patient persona. */
+function setupMessage(model, persona, documentText) {
+  return JSON.stringify({
+    setup: {
+      model: `models/${model}`,
+      generationConfig: { responseModalities: ['AUDIO'] },
+      systemInstruction: {
+        parts: [{ text: VOICE_PROMPT + persona + documentLines(documentText) }],
+      },
+      // Voice-activity detection: BALANCED sensitivity allows ordinary speech
+      // to be recognized promptly while letting natural pauses end the turn
+      // cleanly (around 500ms), eliminating the 30s delay.
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          disabled: false,
+          startOfSpeechSensitivity: 'START_SENSITIVITY_BALANCED',
+          endOfSpeechSensitivity: 'END_SENSITIVITY_BALANCED',
+          prefixPaddingMs: 300,
+          silenceDurationMs: 500,
+        },
+      },
+      // Live transcription of both sides, so the phone can keep a local text
+      // transcript of the voice conversation.
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+    },
+  });
+}
+
 async function bridge(client, auth, documentText) {
   const user = await prisma.user.findUnique({ where: { id: auth.id } }).catch(() => null);
   const persona = personaLines({
@@ -92,83 +141,156 @@ async function bridge(client, auth, documentText) {
     gender: user?.gender,
   });
 
-  const upstream = new WebSocket(LIVE_URL());
-  const queue = [];
-  let ready = false;
+  const models = liveModels();
+  const clientQueue = [];
+  let ready = false; // a model has reached setupComplete
+  let active = null; // the upstream socket carrying the live call
+  let clientClosed = false;
+  let lastReason = '';
 
-  const closeBoth = (code, reason) => {
+  const safeClientSend = (s) => {
     try {
-      client.close(code, reason);
-    } catch {}
-    try {
-      upstream.close();
+      if (client.readyState === client.OPEN) client.send(s);
     } catch {}
   };
 
-  upstream.onopen = () => {
-    upstream.send(
-      JSON.stringify({
-        setup: {
-          model: `models/${LIVE_MODEL()}`,
-          generationConfig: { responseModalities: ['AUDIO'] },
-          systemInstruction: {
-            parts: [{ text: VOICE_PROMPT + persona + documentLines(documentText) }],
-          },
-          // Voice-activity detection: BALANCED sensitivity allows ordinary
-          // speech to be recognized promptly while letting natural pauses
-          // end the turn cleanly (around 500ms), eliminating the 30s delay.
-          realtimeInputConfig: {
-            automaticActivityDetection: {
-              disabled: false,
-              startOfSpeechSensitivity: 'START_SENSITIVITY_BALANCED',
-              endOfSpeechSensitivity: 'END_SENSITIVITY_BALANCED',
-              prefixPaddingMs: 300,
-              silenceDurationMs: 500,
-            },
-          },
-          // Live transcription of both sides, so the phone can keep a local
-          // text transcript of the voice conversation.
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-        },
-      }),
-    );
-    ready = true;
-    for (const m of queue.splice(0)) upstream.send(m);
-  };
+  // Try each candidate model in turn. Only one upstream is ever open at a time:
+  // a failed attempt fully closes before the next opens, and once a model
+  // reaches setupComplete we stop advancing and relay verbatim.
+  function attempt(i) {
+    if (clientClosed) return;
+    if (i >= models.length) {
+      console.error(`[live] all Live models failed (last: ${lastReason || 'unknown'})`);
+      // Tell the phone WHY before closing, so it can show a real reason instead
+      // of a blank "Couldn't start voice" that reads as the assistant ignoring
+      // the patient. A missing Live-API entitlement on the key is the usual
+      // cause even when text chat (REST) works.
+      safeClientSend(
+        JSON.stringify({
+          error: 'voice-unavailable',
+          detail: lastReason || 'The voice model is unavailable on this server.',
+        }),
+      );
+      try {
+        client.close(1011, 'live upstream unavailable');
+      } catch {}
+      return;
+    }
 
-  upstream.onmessage = async (ev) => {
-    if (client.readyState !== client.OPEN) return;
-    // Upstream frames may be Blob (native WebSocket) or string.
-    const data = typeof ev.data === 'string' ? ev.data : Buffer.from(await ev.data.arrayBuffer());
-    // Every Gemini Live frame (setupComplete, audio inlineData, turnComplete) is
-    // JSON text. The phone's WebSocket handler only parses STRING frames, so we
-    // must forward a string — sending a Buffer produces a binary frame that the
-    // client silently drops, which left it stuck on "Connecting…" forever.
-    const out = stripThoughts(data);
-    client.send(typeof out === 'string' ? out : out.toString('utf8'));
-  };
+    const model = models[i];
+    const upstream = new WebSocket(LIVE_URL());
+    let settled = false; // did THIS upstream reach setupComplete?
 
-  upstream.onerror = () => closeBoth(1011, 'upstream error');
-  upstream.onclose = (e) => closeBoth(e.code === 1000 ? 1000 : 1011, String(e.reason || 'upstream closed').slice(0, 120));
+    upstream.onopen = () => {
+      try {
+        upstream.send(setupMessage(model, persona, documentText));
+      } catch {
+        // onerror/onclose will advance to the next model.
+      }
+    };
+
+    upstream.onmessage = async (ev) => {
+      // Upstream frames may be Blob (native WebSocket) or string.
+      const data = typeof ev.data === 'string' ? ev.data : Buffer.from(await ev.data.arrayBuffer());
+      if (!settled) {
+        let m;
+        try {
+          m = JSON.parse(typeof data === 'string' ? data : data.toString('utf8'));
+        } catch {
+          m = null;
+        }
+        if (m?.setupComplete) {
+          settled = true;
+          ready = true;
+          active = upstream;
+          if (i > 0) console.log(`[live] using fallback Live model ${model}`);
+          for (const q of clientQueue.splice(0)) {
+            try {
+              upstream.send(q);
+            } catch {}
+          }
+        } else if (m?.error) {
+          // Gemini rejected setup (bad model, no Live access, quota). Record the
+          // reason and let onclose move to the next candidate — don't relay the
+          // raw error frame to the phone.
+          lastReason = `model ${model}: ${(m.error && (m.error.message || m.error.status)) || 'setup rejected'}`;
+          return;
+        }
+      }
+      if (active !== upstream || client.readyState !== client.OPEN) return;
+      // Every Gemini Live frame (setupComplete, audio inlineData, turnComplete)
+      // is JSON text. The phone's WebSocket handler only parses STRING frames,
+      // so we must forward a string — a Buffer becomes a binary frame the client
+      // silently drops, which left it stuck on "Connecting…" forever.
+      const out = stripThoughts(data);
+      client.send(typeof out === 'string' ? out : out.toString('utf8'));
+    };
+
+    upstream.onerror = () => {
+      if (settled) {
+        try {
+          client.close(1011, 'upstream error');
+        } catch {}
+        try {
+          upstream.close();
+        } catch {}
+        return;
+      }
+      if (!lastReason) lastReason = `model ${model}: upstream error`;
+      try {
+        upstream.close(); // onclose advances to the next model
+      } catch {}
+    };
+
+    upstream.onclose = (e) => {
+      if (settled) {
+        // Normal end of a live call — mirror the close to the phone.
+        try {
+          client.close(
+            e.code === 1000 ? 1000 : 1011,
+            String(e.reason || 'upstream closed').slice(0, 120),
+          );
+        } catch {}
+        return;
+      }
+      if (!lastReason) {
+        lastReason = `model ${model}: closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 120)})` : ''}`;
+      }
+      console.warn(`[live] ${lastReason} — trying next model`);
+      attempt(i + 1);
+    };
+  }
 
   client.on('message', (data, isBinary) => {
     const payload = isBinary ? data : data.toString();
-    if (!ready) {
-      if (queue.length < 200) queue.push(payload);
+    if (!ready || !active) {
+      if (clientQueue.length < 200) clientQueue.push(payload);
       return;
     }
     try {
-      upstream.send(payload);
+      active.send(payload);
     } catch {
-      closeBoth(1011, 'relay failed');
+      try {
+        client.close(1011, 'relay failed');
+      } catch {}
+      try {
+        active.close();
+      } catch {}
     }
   });
 
   client.on('close', () => {
+    clientClosed = true;
     try {
-      upstream.close();
+      active?.close();
     } catch {}
   });
-  client.on('error', () => closeBoth(1011, 'client error'));
+  client.on('error', () => {
+    clientClosed = true;
+    try {
+      active?.close();
+    } catch {}
+  });
+
+  attempt(0);
 }
