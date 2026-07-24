@@ -105,12 +105,13 @@ async function verifyAccountHolder(token, user, purpose) {
   const live = await verifyLivenessToken(token, { purpose, userId: user?.id ?? null });
   if (!live.ok) return { ...live, ok: false, reason: 'liveness' };
 
-  if (!identityMatchEnabled()) return { ...live, matched: null };
+  if (!identityMatchEnabled()) return { ...live, status: live.status, matched: null };
 
   if (!user?.firstName || !user?.lastName || !user?.birthDate) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'This account has no verified National ID identity on file to match against.',
     };
@@ -131,6 +132,7 @@ async function verifyAccountHolder(token, user, purpose) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'Could not confirm your identity with eVerify. Please try again.',
     };
@@ -141,11 +143,12 @@ async function verifyAccountHolder(token, user, purpose) {
     return {
       ok: false,
       score: live.score,
+      status: live.status,
       reason: 'identity',
       error: 'That face does not match the National ID on this account.',
     };
   }
-  return { ok: true, score: live.score, matched: true };
+  return { ok: true, score: live.score, status: live.status, matched: true };
 }
 
 /**
@@ -318,13 +321,19 @@ api.post(
     let liveVerified = false;
     if (b.livenessToken) {
       const live = await verifyLivenessToken(b.livenessToken, { purpose: `register:${role}` });
-      if (!live.ok)
+      if (!live.ok) {
+        const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(live.status ?? '').toUpperCase());
+        const errorMsg =
+          isSucceeded && live.score < 95
+            ? `Face Liveness score too low (${live.score}% < 95% required). Please try the liveness test again.`
+            : `Face Liveness check did not pass (${live.status ?? 'no result'}${
+                live.score ? `, score ${live.score}%` : ''
+              }). Please try the liveness test again.`;
         return res.status(403).json({
-          error: `Face Liveness check did not pass (${live.status ?? 'no result'}${
-            live.score ? `, score ${live.score}` : ''
-          }). Please try the liveness test again.`,
+          error: errorMsg,
           liveness: live,
         });
+      }
 
       // Anti-spoof liveness only proves *a* live person is present — not that
       // it is the person whose National ID was just scanned. Bind the live face
@@ -532,14 +541,19 @@ api.post(
     const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     const check = await verifyAccountHolder(livenessToken, me, 'edit-unlock');
-    if (!check.ok)
+    if (!check.ok) {
+      const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const errorMsg =
+        check.reason === 'identity'
+          ? check.error
+          : isSucceeded && check.score < 95
+          ? `Face Liveness confidence score too low (${check.score}% < 95% required).`
+          : `Face Liveness check did not pass (${check.status ?? 'no result'}).`;
       return res.status(403).json({
-        error:
-          check.reason === 'identity'
-            ? check.error
-            : `Face Liveness check did not pass (${check.status ?? 'no result'}).`,
+        error: errorMsg,
         liveness: check,
       });
+    }
     await prisma.user.update({ where: { id: req.auth.id }, data: { everified: true, liveVerified: true } });
     res.json({ verified: true, score: check.score });
   }),
@@ -614,14 +628,19 @@ api.post(
     const me = await prisma.user.findUnique({ where: { id: req.auth.id } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     const check = await verifyAccountHolder(livenessToken, me, 'key-recovery');
-    if (!check.ok)
+    if (!check.ok) {
+      const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(check.status ?? '').toUpperCase());
+      const errorMsg =
+        check.reason === 'identity'
+          ? `${check.error} Records stay locked.`
+          : isSucceeded && check.score < 95
+          ? `Face Liveness confidence score too low (${check.score}% < 95% required). Records stay locked.`
+          : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`;
       return res.status(403).json({
-        error:
-          check.reason === 'identity'
-            ? `${check.error} Records stay locked.`
-            : `Face Liveness check did not pass (${check.status ?? 'no result'}). Records stay locked.`,
+        error: errorMsg,
         liveness: check,
       });
+    }
     const escrow = await prisma.keyEscrow.findUnique({ where: { userId: req.auth.id } });
     if (!escrow) return res.status(404).json({ error: 'No escrowed key for this account yet.' });
     let patientKey;

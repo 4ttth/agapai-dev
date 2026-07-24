@@ -195,10 +195,30 @@ export async function getLivenessResult(token) {
       snippet: s.text,
     });
   }
-  const score = Number(body.confidence_score ?? 0);
+  const data = body?.data ?? body;
+  const rawStatus = data?.status ?? body?.status;
+  const isSucceeded = ['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(String(rawStatus ?? '').toUpperCase());
+
+  const rawScore = Number(
+    data?.confidence_score ??
+      data?.confidence ??
+      data?.score ??
+      data?.liveness_score ??
+      body?.confidence_score ??
+      body?.confidence ??
+      body?.score ??
+      0
+  );
+  const score = rawScore > 0 && rawScore <= 1 ? Math.round(rawScore * 100) : rawScore;
   const threshold = Number(process.env.LIVENESS_SCORE_THRESHOLD ?? 95);
-  const ok = body.status === 'SUCCEEDED' && score >= threshold;
-  return { ok, status: body.status, score, referenceImageUrl: body.reference_image_url ?? null, raw: body };
+  const ok = isSucceeded && score >= threshold;
+  return {
+    ok,
+    status: rawStatus ?? 'UNKNOWN',
+    score,
+    referenceImageUrl: data?.reference_image_url ?? body?.reference_image_url ?? null,
+    raw: body,
+  };
 }
 
 // ---------- eGov AI ----------
